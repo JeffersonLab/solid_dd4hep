@@ -1,5 +1,6 @@
 !*.png
 
+/*.xml
 *.prim
 */*.eps
 */*/*.eps
@@ -7,7 +8,42 @@
 */*/*.pdf
 *.root
 build/*
-.DAWN*
-fieldmaps/*
-fieldmaps
-data/*
+*/*.pyc
+**.pyc
+
+lib/
+share/
+
+images/*
+
+accelerator
+eic_ip6
+eic
+ip6_build
+
+*.swp
+
+fieldmaps/
+gdml/
+calibrations/
+
+manifest.txt
+acts.txt
+acts2.txt
+
+materials-map.cbor
+
+# local install directories
+prefix/
+lib/
+share/
+setup.sh
+
+# jekyll
+Gemfile.lock
+vendor/
+.bundle
+.jekyll-cache/
+.jekyll-metadata
+.sass-cache/
+_site/

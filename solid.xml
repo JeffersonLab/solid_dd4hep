@@ -10,11 +10,21 @@
   <!-- Standard environmental conditions: 20 °C, 1 atm -->
   <std_conditions type="NTP"/>
 
+  <define>
+    <documentation level="2">
+      ## Main Constant Definitions
+
+      The ip6 (or other ip) defines should be included first.
+      These files have only a define tags.
+    </documentation>
+    <include ref="${DD4hepINSTALL}/DDDetectors/compact/detector_types.xml"/>
+  </define>
+
   <!-- materials -->
   <includes>
     <gdmlFile ref="${DD4hepINSTALL}/DDDetectors/compact/elements.xml"/>
-    <file ref="compact/materials.xml"/>
-    <file ref="compact/optics.xml"/>
+    <file ref="${DETECTOR_PATH}/compact/materials.xml"/>
+    <file ref="${DETECTOR_PATH}/compact/optics.xml"/>
   </includes>
 
   <!-- default limits setting -->
@@ -41,8 +51,8 @@
 
   <!-- displays -->
   <display>
-    <include ref="compact/colors.xml"/>
-    <include ref="compact/display.xml"/>
+    <include ref="${DETECTOR_PATH}/compact/colors.xml"/>
+    <include ref="${DETECTOR_PATH}/compact/display.xml"/>
   </display>
 
   <!-- world box -->
@@ -58,41 +68,33 @@
     <constant name="PhotMomWaveConv" value="1243.125*eV"/>
   </define>
 
-      <!--<include ref="compact/fields.xml"/>-->
+  <include ref="${DETECTOR_PATH}/compact/fields.xml"/>
 
   <detectors>
-    <include ref="compact/FAEC.xml"/>
-    <include ref="compact/LGC.xml"/>
-    <include ref="compact/HGC.xml"/>
-    <include ref="compact/LAEC.xml"/>
-    <include ref="compact/GEM_sidis.xml"/>
+    <include ref="${DETECTOR_PATH}/compact/FAEC.xml"/>
+    <include ref="${DETECTOR_PATH}/compact/LGC.xml"/>
+    <include ref="${DETECTOR_PATH}/compact/HGC.xml"/>
+    <include ref="${DETECTOR_PATH}/compact/LAEC.xml"/>
+    <include ref="${DETECTOR_PATH}/compact/GEM_sidis.xml"/>
   </detectors>
 
   <!--  Definition of the readout segmentation/definition  -->
   <readouts>
     <readout name="LAEC_PrShHits">
       <segmentation type="NoSegmentation" />
-      <id>system:6,module:20,layer:10,slice:5,x:48:-8,y:-8</id>
+      <id>system:8,module:20,layer:10,slice:5,x:48:-8,y:-8</id>
     </readout>
     <readout name="LAEC_ShHits">
       <segmentation type="NoSegmentation" />
-      <id>system:6,module:20,layer:10,slice:5,x:48:-8,y:-8</id>
+      <id>system:8,module:20,layer:10,slice:5,x:48:-8,y:-8</id>
     </readout>
     <readout name="FAEC_PrShHits">
       <segmentation type="NoSegmentation" />
-      <id>system:6,module:20,layer:10,slice:5,x:48:-8,y:-8</id>
+      <id>system:8,module:20,layer:10,slice:5,x:48:-8,y:-8</id>
     </readout>
     <readout name="FAEC_ShHits">
       <segmentation type="NoSegmentation" />
-      <id>system:6,module:20,layer:10,slice:5,x:48:-8,y:-8</id>
-    </readout>
-    <readout name="GEMTrackerHits">
-      <segmentation type="CartesianGridXY" grid_size_x="1*mm" grid_size_y="1*mm" />
-      <id>system:6,layer:5,module:16,slice:5,x:32:-16,y:-16</id>
-      <!--
-      <segmentation type="StereoStrip" strip_angle="15.0*degree" strip_size="0.5*mm" />
-      <id>system:6,layer:5,module:16,slice:5,u:32:-32</id>
-      -->
+      <id>system:8,module:20,layer:10,slice:5,x:48:-8,y:-8</id>
     </readout>
   </readouts>
 </lccdd>

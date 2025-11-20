@@ -12,7 +12,8 @@ PROJECT(solid
 set(CMAKE_CXX_STANDARD 17)
 find_package( DD4hep REQUIRED COMPONENTS DDCore DDG4)
 
-find_package(Acts REQUIRED COMPONENTS Core PluginIdentification PluginTGeo PluginDD4hep )
+#find_package(Acts REQUIRED COMPONENTS Core PluginIdentification PluginTGeo PluginDD4hep )
+find_package(Acts REQUIRED COMPONENTS Core PluginTGeo PluginDD4hep )
 
 find_package(fmt)
 #find_library(FMT_LIBRARY fmt)
@@ -34,10 +35,10 @@ target_link_libraries(${a_lib_name}
 
 #-----------------------------------------------------------------------------------
 # Install the detector description files.
-install(DIRECTORY compact/
-    DESTINATION share/${PROJECT_NAME}/${a_lib_name}
-    FILES_MATCHING PATTERN "*.xml"
-    )
+#install(DIRECTORY compact/
+#    DESTINATION share/${PROJECT_NAME}/${a_lib_name}
+#    FILES_MATCHING PATTERN "*.xml"
+#    )
 install(DIRECTORY compact/
     DESTINATION share/${PROJECT_NAME}/compact
     FILES_MATCHING PATTERN "*.xml"

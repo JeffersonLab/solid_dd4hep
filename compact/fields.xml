@@ -1,13 +1,13 @@
 <lccdd>
   <fields>
     <field type="SoLID_FieldMapB" name="GlobalSolenoid" field_type="magnetic" coord_type="BrBz"
-           field_map="fieldmaps/solenoid_CLEOv8.dat" 
+           field_map="fieldmaps/solenoid_CLEOv9.dat"
            url="https://jlabsvn.jlab.org/svnroot/solid/solid_gemc2/field/solenoid_CLEOv9.dat"
-           scale="1.0">
+           scale="1e-4">
       <dimensions>
         <R step="1.0*cm" min="0*cm" max="500*cm" />
         <Z step="1.0*cm" min="-600*cm" max="600*cm" />
-        <translationCoord x="100.0*cm" y="0.0*cm" z="0.0*cm" />
+        <translationCoord x="0.0*cm" y="0.0*cm" z="0.0*cm" />
         <rotationField x="0" y="0" z="0" />
       </dimensions>
     </field>

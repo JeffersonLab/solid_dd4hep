@@ -1,61 +1,89 @@
+<!-- SPDX-License-Identifier: LGPL-3.0-or-later -->
+<!-- Copyright (C) 2025 Zhongling Ji -->
+
 <lccdd>
   <detectors>
-    <detector id="2" name="GEMTracker_SIDIS" vis="GEM_TrackerDiscVis" type="SoLID_GEMTrackerDisc" readout="GEMTrackerHits" >
-      <module name="Module_A" id="1" inner_r="50.0*cm"  outer_r="118.0*cm" segments="30">
-        <slice name="drift_cathode" material="Kapton" thickness="0.100*mm"/>
-        <slice name="drift_gas1" material="GEMGas" thickness="3.0*mm"/>
-        <slice name="gem_foil_1" material="Kapton" thickness="0.100*mm"/>
-        <slice name="drift_gas2" material="GEMGas" thickness="2.0*mm"/>
-        <slice name="gem_foil_2" material="Kapton" thickness="0.100*mm"/>
-        <slice name="drift_gas3" material="GEMGas" thickness="2.0*mm"/>
-        <slice name="gem_foil_3" material="Kapton" thickness="0.100*mm"/>
-        <slice name="drift_gas4" material="GEMGas" thickness="2.0*mm"/>
-        <slice name="u_readout_plane" material="Kapton" thickness="0.200*mm" sensitive="true"/>
-        <slice name="v_readout_plane" material="Kapton" thickness="0.200*mm" sensitive="true"/>
+    <detector id="9"
+      name="GEMSubAssembly"
+      type="DD4hep_SubdetectorAssembly"
+      vis="TrackerSubAssemblyVis">
+      <composite name="DummyGEMTracker_SIDIS"/>
+      <composite name="GEMTracker_SIDIS"/>
+    </detector>
+    <detector
+      id="1"
+      name="DummyGEMTracker_SIDIS"
+      type="SoLID_CompositeTracker"
+      actsType="endcap"
+      vis="TrackerSubAssemblyVis">
+      <type_flags type="DetType_TRACKER + DetType_ENDCAP"/>
+      <position x="0*cm" y="0*cm" z="-1*um" />
+    </detector>
+    <detector
+      id="2"
+      name="GEMTracker_SIDIS"
+      type="SoLID_TrapEndcapTracker"
+      actsType="endcap"
+      readout="GEMTrackerHits"
+      vis="GEM_TrackerDiscVis"
+      reflect="false">
+      <type_flags type="DetType_TRACKER + DetType_ENDCAP"/>
+      <module name="Module1" vis="GEM_TrackerModuleVis">
+        <module_component name="drift_cathode" material="Kapton" thickness="0.100*mm" vis="GEM_TrackerDiscVis"/>
+        <module_component name="drift_gas1" material="GEMGas" thickness="3.0*mm" vis="GEM_TrackerDiscVis"/>
+        <module_component name="gem_foil_1" material="Kapton" thickness="0.100*mm" vis="GEM_TrackerDiscVis"/>
+        <module_component name="drift_gas2" material="GEMGas" thickness="2.0*mm" vis="GEM_TrackerDiscVis"/>
+        <module_component name="gem_foil_2" material="Kapton" thickness="0.100*mm" vis="GEM_TrackerDiscVis"/>
+        <module_component name="drift_gas3" material="GEMGas" thickness="2.0*mm" vis="GEM_TrackerDiscVis"/>
+        <module_component name="gem_foil_3" material="Kapton" thickness="0.100*mm" vis="GEM_TrackerDiscVis"/>
+        <module_component name="drift_gas4" material="GEMGas" thickness="2.0*mm" vis="GEM_TrackerDiscVis"/>
+        <module_component name="u_readout_plane" material="Kapton" thickness="0.200*mm" sensitive="true" vis="GEM_TrackerDiscVis"/>
+        <!--module_component name="v_readout_plane" material="Kapton" thickness="0.200*mm" sensitive="true" vis="GEM_TrackerDiscVis"/-->
       </module>
-      <module name="Module_B" id="2" inner_r="61.0*cm"  outer_r="140.0*cm" segments="30">
-        <slice name="drift_cathode" material="Kapton" thickness="0.100*mm"/>
-        <slice name="drift_gas1" material="GEMGas" thickness="3.0*mm"/>
-        <slice name="gem_foil_1" material="Kapton" thickness="0.100*mm"/>
-        <slice name="drift_gas2" material="GEMGas" thickness="2.0*mm"/>
-        <slice name="gem_foil_2" material="Kapton" thickness="0.100*mm"/>
-        <slice name="drift_gas3" material="GEMGas" thickness="2.0*mm"/>
-        <slice name="gem_foil_3" material="Kapton" thickness="0.100*mm"/>
-        <slice name="drift_gas4" material="GEMGas" thickness="2.0*mm"/>
-        <slice name="u_readout_plane" material="Kapton" thickness="0.200*mm" sensitive="true"/>
-        <slice name="v_readout_plane" material="Kapton" thickness="0.200*mm" sensitive="true"/>
-      </module>
-      <module name="Module_C" id="2" inner_r="110.0*cm"  outer_r="200.0*cm" segments="30">
-        <slice name="drift_cathode" material="Kapton" thickness="0.100*mm"/>
-        <slice name="drift_gas1" material="GEMGas" thickness="3.0*mm"/>
-        <slice name="gem_foil_1" material="Kapton" thickness="0.100*mm"/>
-        <slice name="drift_gas2" material="GEMGas" thickness="2.0*mm"/>
-        <slice name="gem_foil_2" material="Kapton" thickness="0.100*mm"/>
-        <slice name="drift_gas3" material="GEMGas" thickness="2.0*mm"/>
-        <slice name="gem_foil_3" material="Kapton" thickness="0.100*mm"/>
-        <slice name="drift_gas4" material="GEMGas" thickness="2.0*mm"/>
-        <slice name="u_readout_plane" material="Kapton" thickness="0.200*mm" sensitive="true"/>
-        <slice name="v_readout_plane" material="Kapton" thickness="0.200*mm" sensitive="true"/>
-      </module>
-      <layer id="1" z="-175*cm" inner_r="36*cm"  outer_r="87.0*cm"  phi0_offset="0.0*deg" Nmodules="30">
-        <module name="Module_A"/>
+      <layer id="1" zstart="-175*cm" rmin="36*cm" rmax="87*cm" phi0="0*deg" nmodules="30" vis="GEM_TrackerLayerVis">
+        <module name="Module1"/>
+        <layer_material surface="inner" binning="binPhi,binR" bins0="30" bins1="30"/>
+        <layer_material surface="outer" binning="binPhi,binR" bins0="30" bins1="30"/>
       </layer>
-      <layer id="2" z="-150*cm" inner_r="21*cm"  outer_r="98.0*cm"  phi0_offset="0.0*deg" Nmodules="20">
-        <module name="Module_B"/>
+      <layer id="2" zstart="-150*cm" rmin="21*cm" rmax="98*cm" phi0="0*deg" nmodules="24" vis="GEM_TrackerLayerVis">
+        <module name="Module1"/>
+        <layer_material surface="inner" binning="binPhi,binR" bins0="24" bins1="30"/>
+        <layer_material surface="outer" binning="binPhi,binR" bins0="24" bins1="30"/>
       </layer>
-      <layer id="3" z="-119*cm" inner_r="29*cm"  outer_r="112.0*cm" phi0_offset="0.0*deg" Nmodules="16">
-        <module name="Module_C"/>
+      <layer id="3" zstart="-119*cm" rmin="25*cm" rmax="112*cm" phi0="0*deg" nmodules="21" vis="GEM_TrackerLayerVis">
+        <module name="Module1"/>
+        <layer_material surface="inner" binning="binPhi,binR" bins0="21" bins1="30"/>
+        <layer_material surface="outer" binning="binPhi,binR" bins0="21" bins1="30"/>
       </layer>
-      <layer id="4" z="-80*cm" inner_r="32*cm"  outer_r="135.0*cm" phi0_offset="0.0*deg" Nmodules="18">
-        <module name="Module_C"/>
+      <layer id="4" zstart="-68*cm" rmin="32*cm" rmax="135*cm" phi0="0*deg" nmodules="21" vis="GEM_TrackerLayerVis">
+        <module name="Module1"/>
+        <layer_material surface="inner" binning="binPhi,binR" bins0="21" bins1="30"/>
+        <layer_material surface="outer" binning="binPhi,binR" bins0="21" bins1="30"/>
       </layer>
-      <layer id="5" z="5*cm" inner_r="42*cm"  outer_r="100.0*cm" phi0_offset="0.0*deg" Nmodules="28">
-        <module name="Module_B"/>
+      <layer id="5" zstart="5*cm" rmin="42*cm" rmax="100*cm" phi0="0*deg" nmodules="29" vis="GEM_TrackerLayerVis">
+        <module name="Module1"/>
+        <layer_material surface="inner" binning="binPhi,binR" bins0="29" bins1="30"/>
+        <layer_material surface="outer" binning="binPhi,binR" bins0="29" bins1="30"/>
       </layer>
-      <layer id="6" z="92*cm" inner_r="55*cm"  outer_r="123.0*cm" phi0_offset="0.0*deg" Nmodules="24">
-        <module name="Module_B"/>
-        <module name="Module_C"/>
+      <layer id="6" zstart="92*cm" rmin="55*cm" rmax="123*cm" phi0="0*deg" nmodules="25" vis="GEM_TrackerLayerVis">
+        <module name="Module1"/>
+        <layer_material surface="inner" binning="binPhi,binR" bins0="25" bins1="30"/>
+        <layer_material surface="outer" binning="binPhi,binR" bins0="25" bins1="30"/>
       </layer>
     </detector>
   </detectors>
+
+  <plugins>
+    <plugin name="DD4hep_ParametersPlugin">
+      <argument value="GEMTracker_SIDIS"/>
+      <argument value="layer_pattern: str=GEMTracker_SIDIS_layer\d"/>
+    </plugin>
+  </plugins>
+
+  <readouts>
+    <readout name="GEMTrackerHits">
+      <segmentation type="CartesianGridXZ" grid_size_x="1*mm" grid_size_z="1*mm"/>
+      <id>system:8,layer:5,module:16,sensor:3,x:32:-16,z:-16</id>
+    </readout>
+  </readouts>
 </lccdd>

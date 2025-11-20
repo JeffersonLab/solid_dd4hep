@@ -1,8 +1,12 @@
 <!-- SPDX-License-Identifier: LGPL-3.0-or-later -->
-<!-- Copyright (C) 2024 Chao Peng, Whitney Armstrong -->
+<!-- Copyright (C) 2025 Chao Peng, Whitney Armstrong, Zhongling Ji -->
 
-<lccdd>
-  <materials>
+<materials>
+  <!--
+       Air by weight from
+
+       http://www.engineeringtoolbox.com/air-composition-24_212.html
+  -->
   <material name="Air">
     <D type="density" unit="g/cm3" value="0.0012"/>
     <fraction n="0.754" ref="N"/>
@@ -63,6 +67,24 @@
     <D value="7.85" unit="g/cm3"/>
     <fraction n="0.998" ref="Fe"/>
     <fraction n=".002" ref="C"/>
+  </material>
+  <material name="Steel1020">
+    <D value="7.86" unit="g/cm3"/>
+    <fraction n="0.993" ref="Fe"/>
+    <fraction n=".002" ref="C"/>
+    <fraction n=".005" ref="Mn"/>
+  </material>
+  <material name="Steel1008">
+    <comment>
+      SAE AISI 1008 cold-rolled low-carbon steel
+      https://www.azom.com/article.aspx?ArticleID=6538
+    </comment>
+    <D value="7.85" unit="g/cm3"/>
+    <fraction n="0.994" ref="Fe"/>
+    <fraction n=".004" ref="Mn"/>
+    <fraction n=".001" ref="C"/>
+    <fraction n=".0005" ref="S"/>
+    <fraction n=".0005" ref="P"/>
   </material>
   <material name="Aluminum5083">
     <D value="2.650" unit="g/cm3"/>
@@ -316,7 +338,7 @@
     <composite n="4" ref="O"/>
     <constant name="BirksConstant" value="0.0333*mm/MeV"/>
   </material>
-  <material name="Ar10CO2">
+  <material name="Ar90CO2">
     <D type="density" value="1.802" unit="mg / cm3"/>
     <composite n="0.891" ref="Argon"/>
     <!--<composite n="0.109" ref="CarbonDioxide"/>-->
@@ -475,6 +497,11 @@
     <fraction n="0.9622" ref="Pb"/>
     <fraction n="0.0378" ref="SciFiPb_Glue"/>
   </material>
+  <material name="SciFiPb_PbGlue_Edge">
+    <D type="density" value="4.231" unit="g / cm3"/>
+    <fraction n="0.805" ref="Pb"/>
+    <fraction n="0.195" ref="SciFiPb_Glue"/>
+  </material>
   <material name="Brass">
     <D type="density" value="8.41" unit="g / cm3"/>
     <fraction n="0.70" ref="Cu"/>
@@ -511,10 +538,15 @@
     <fraction n="0.18046" ref="O"/>
     <fraction n="0.00190" ref="Ce"/>
   </material>
-    <material name="EJ204">
+  <material name="EJ204">
     <D value="1.032" unit="g/cm3" />
     <composite n="521" ref="H" />
     <composite n="474" ref="C" />
   </material>
-  </materials>
-</lccdd>
+  <material name="GEMGas">
+    <D type="density" unit="g/cm3" value="0.0021"/>
+    <fraction n="0.4375" ref="Ar"/>
+    <fraction n="0.1875" ref="C"/>
+    <fraction n="0.3750" ref="O"/>
+  </material>
+</materials>
