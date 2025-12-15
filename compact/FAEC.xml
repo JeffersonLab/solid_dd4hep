@@ -1,15 +1,12 @@
 <lccdd>
-  <!--  Definition of global dictionary constants          -->
+  <!-- Forward Angle Electromagnetic Calorimeter -->
   <define>
+    <constant name="FAEC_rmod" value="6.25 * cm"/>
   </define>
 
-  <!-- Forward Angle Electromagnetic Calorimeter 
-      <comment>Forward Angle Electromagnetic Calorimeter (FAEC) for SIDIS</comment>
-      <comment>Forward Angle Electromagnetic Calorimeter (FAEC) for SIDIS</comment>
-  -->
   <detectors>
     <detector id="5" name="FAECPreShower" type="SoLID_HexShashlykEMCal" readout="FAEC_PrShHits" vis="FAEC_PrShVis" >
-      <dimensions rmin="98*cm" rmax="230*cm" z0="425*cm" rmod="6.25*cm" rtol="1.0*cm" />
+      <dimensions rmin="98*cm" rmax="230*cm" z0="425*cm" rmod="FAEC_rmod" rtol="1.0*cm" />
       <layer repeat="1" vis="FAEC_PrShLayerVis">
         <slice material = "Lead"  thickness = "1.12*cm" vis="MatLayerVis_Lead" />
         <slice material = "EJ204" thickness = "6.25*cm" sensitive="yes" limits="cal_limits" vis="MatLayerVis_EJ204" />
@@ -17,7 +14,7 @@
     </detector>
 
     <detector id="6" name="FAECShower" type="SoLID_HexShashlykEMCal" readout="FAEC_ShHits" vis="FAEC_ShVis" >
-      <dimensions rmin="98*cm" rmax="230*cm" z0="433*cm" rmod="6.25*cm" rtol="1.0*cm" />
+      <dimensions rmin="98*cm" rmax="230*cm" z0="433*cm" rmod="FAEC_rmod" rtol="1.0*cm" />
       <layer repeat="194" vis="FAEC_ShLayerVis">
         <slice material = "Lead"  thickness = "0.05*cm" vis="MatLayerVis_Lead" />
         <slice material = "EJ204" thickness = "0.15*cm" sensitive="yes" limits="cal_limits" vis="MatLayerVis_EJ204" />

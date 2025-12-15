@@ -1,27 +1,27 @@
 <lccdd>
-<!-- Large Angle Electromagnetic Calorimeter -->
-<define>
-</define>
+  <!-- Large Angle Electromagnetic Calorimeter -->
+  <define>
+    <constant name="LAEC_rmod" value="6.25 * cm"/>
+  </define>
 
-<detectors>
-<detector id="3" name="LAECPreShower" type="SoLID_HexShashlykEMCal" readout="LAEC_PrShHits" vis="LAEC_PrShVis" >
-  <comment>Large Angle Electromagnetic Calorimeter (LAEC) Preshower for SIDIS</comment>
-  <dimensions rmin="83*cm" rmax="140*cm" z0="-65*cm" rmod="6.25*cm" rtol="1.0*cm" />
-  <layer repeat="1" vis="LAEC_PrshLayerVis">
-    <slice material = "Lead"  thickness = "1.12*cm" vis="MatLayerVis_Lead" />
-    <slice material = "EJ204" thickness = "6.25*cm" sensitive="yes" limits="cal_limits" vis="MatLayerVis_EJ204" />
-  </layer>
-</detector>
+  <detectors>
+  <detector id="3" name="LAECPreShower" type="SoLID_HexShashlykEMCal" readout="LAEC_PrShHits" vis="LAEC_PrShVis" >
+    <comment>Large Angle Electromagnetic Calorimeter (LAEC) Preshower for SIDIS</comment>
+    <dimensions rmin="83*cm" rmax="140*cm" z0="-65*cm" rmod="LAEC_rmod" rtol="1.0*cm" />
+    <layer repeat="1" vis="LAEC_PrshLayerVis">
+      <slice material = "Lead"  thickness = "1.12*cm" vis="MatLayerVis_Lead" />
+      <slice material = "EJ204" thickness = "6.25*cm" sensitive="yes" limits="cal_limits" vis="MatLayerVis_EJ204" />
+    </layer>
+  </detector>
 
-<detector id="4" name="LAECShower" type="SoLID_HexShashlykEMCal" readout="LAEC_ShHits" vis="LAEC_ShVis" >
-  <comment>Large Angle Electromagnetic Calorimeter (LAEC) Shower for SIDIS</comment>
-  <dimensions rmin="83*cm" rmax="140*cm" z0="-57*cm" rmod="6.25*cm" rtol="1.0*cm" />
-  <layer repeat="194" vis="LAEC_ShLayerVis">
-    <slice material = "Lead"  thickness = "0.05*cm" vis="MatLayerVis_Lead" />
-    <slice material = "EJ204" thickness = "0.15*cm" sensitive="yes" limits="cal_limits" vis="MatLayerVis_EJ204" />
-    <slice material = "Air"   thickness = "0.012*2*cm" vis="MatLayerVis_Air" />
-  </layer>
-</detector>
-</detectors>
-
+  <detector id="4" name="LAECShower" type="SoLID_HexShashlykEMCal" readout="LAEC_ShHits" vis="LAEC_ShVis" >
+    <comment>Large Angle Electromagnetic Calorimeter (LAEC) Shower for SIDIS</comment>
+    <dimensions rmin="83*cm" rmax="140*cm" z0="-57*cm" rmod="LAEC_rmod" rtol="1.0*cm" />
+    <layer repeat="194" vis="LAEC_ShLayerVis">
+      <slice material = "Lead"  thickness = "0.05*cm" vis="MatLayerVis_Lead" />
+      <slice material = "EJ204" thickness = "0.15*cm" sensitive="yes" limits="cal_limits" vis="MatLayerVis_EJ204" />
+      <slice material = "Air"   thickness = "0.012*2*cm" vis="MatLayerVis_Air" />
+    </layer>
+  </detector>
+  </detectors>
 </lccdd>
