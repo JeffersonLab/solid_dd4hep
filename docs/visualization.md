@@ -19,7 +19,9 @@ compact file --> solid_scene_dump ----------------------> scene.npz ----.
 scene.npz --> solid_scene_dump --prim / solid_lineview.scene.write_prim --> .prim for dawn and dawncut
 ```
 
-`make_solid_views` runs both steps for the standard views.
+`make_solid_views` runs both steps for the standard views. For its field views it also runs
+`solid_field_dump`, which samples the magnetic field of the configuration on the section plane
+([Magnetic field on the geometry](#magnetic-field-on-the-geometry)).
 
 Simulated events on these drawings (tracks, hits, energy per volume, animations) are described in
 [event_display.md](event_display.md).
@@ -31,7 +33,7 @@ source <prefix>/bin/thissolid.sh solid_JPsi_lite
 make_solid_views -o views                       # section_yz, section_xz, cutaway, lines_yz
 make_solid_views -o views --views beam_440,beam_-40      # beam-eye sections at z = 440 and -40 cm
 make_solid_views -o views --views overview      # labelled detector overview (see below)
-make_solid_views -o views --views field_yz      # x = 0 section with the solenoid field under it (see below)
+make_solid_views -o views --views field_yz,field_xz,field_target   # sections with the magnetic field (see below)
 make_solid_views -o views -n 5                  # 5 gun events on event views (see event_display.md)
 make_solid_views -o views --source dawnfile     # geometry from the Geant4 DAWNFILE driver instead of the scene
 make_solid_views -o views --scene scene.npz     # draw an existing scene.npz or .prim file
@@ -143,14 +145,24 @@ python3 -c "from solid_lineview import scene; scene.write_prim('scene.npz', 'sol
 The file is in g4.prim format 2.4, as the DAWNFILE driver writes it: `/BoundingBox`, then one `/Polyhedron` per
 drawn volume with `#/PVName`, `/ColorRGB`, `/ForceWireframe`, `/Origin` and `/BaseVector`. Every volume is a
 polyhedron (the driver writes boxes, tubes and trapezoids as DAWN primitives), and coordinates have 9 significant
-digits. `solid_lineview` reads the file back to the same volumes as the `.npz`. It has not been opened with the
-`dawn` program itself, which needs an X display.
+digits. `solid_lineview` reads the file back to the same volumes as the `.npz`.
+
+`dawncut` 1.54a and `dawn` 3.91a of eic_xl read it too. Checked with the `solid_JPsi_lite` scene: `dawncut` cut
+it at x = 0 in 0.3 s, and `dawn` drew the cut file to EPS in its hidden-line style in 4 s, without a display:
+
+```bash
+dawncut -1 0 0 0 solid.prim cut.prim
+DAWN_PS_PREVIEWER=NONE dawn -d cut.prim         # writes cut.eps; -d takes camera and style from ./.DAWN_1.history
+```
+
+The first `dawn -d` run in a directory writes `.DAWN_1.history` with its defaults (wireframe); lines 2, 3 and 9 of
+that file are the polar angle, the azimuth and the style (4 = hidden lines).
 
 ### From Python
 
 `solid_lineview` is an ordinary package (`python/solid_lineview` in the source tree, `<prefix>/python` when
-installed; `thissolid.sh` adds the latter to `PYTHONPATH`). Version 0.5.1 draws exactly as 0.5.0 and adds
-`cairo_draw_items()` and `svg_items()`, the bodies of the PNG and SVG writers, which the event display uses. The `solid_lineview` command and
+installed; `thissolid.sh` adds the latter to `PYTHONPATH`). `cairo_draw_items()` and `svg_items()` are the
+bodies of the PNG and SVG writers, which the event display uses. The `solid_lineview` command and
 `python3 -m solid_lineview` both call `solid_lineview.main()`.
 
 ```python
@@ -194,57 +206,111 @@ gives crisper text than the PNG there.
 
 ## Magnetic field on the geometry
 
-The `field_yz` view of `make_solid_views` draws the solenoid field under the x = 0 section of the detector, so the
-field at the target and at each detector can be read off the drawing:
+The field views of `make_solid_views` draw the magnetic field under a section of the detector, so the field at the
+target and at each detector can be read off the drawing:
 
-![SIDIS 3He: solenoid field under the x = 0 section](images/field_yz_solid_SIDIS_He3.svg)
+![SIDIS 3He: magnetic field under the x = 0 section](images/field_yz_solid_SIDIS_He3.svg)
+
+| view | section |
+|---|---|
+| `field_yz` | x = 0, seen from the side (y up) |
+| `field_xz` | y = 0, seen from above (x up) |
+| `field_target` | y = 0 around the target, 1 m on each side of it, seen from above |
+
+What is drawn:
 
 - **Colour bands:** |B| in one hue from light to dark, with band edges at 1, 3, 10, 30, 100, 300 G, 0.1, 0.3, 1 and
-  3 T. Below 1 G and outside the map the drawing stays blank.
-- **Field lines:** the same flux runs between neighbouring lines, so they are close where the field is strong. They
-  are contours of the flux function ψ(r, z) = ∫₀ʳ Bz r′ dr′. A 1 cm map cannot be integrated through iron, so ψ is
-  carried from the axis through the air only, and no lines are drawn in iron.
+  3 T, and a 3 to 10 T band when the field exceeds 3 T. Below 1 G and outside the sampled range the drawing stays
+  blank.
+- **Field lines.** There are two kinds, and the key says which one a figure has:
+  - *Equal flux between lines.* The same flux runs between neighbouring lines, so they are close where the field is
+    strong. They are contours of the flux function ψ(r, z) = ∫₀ʳ Bz r′ dr′, which exists where the in-plane field
+    is axisymmetric about the beam axis: the solenoid in any plane through the axis, and also the solenoid plus
+    the NH₃ target magnet in the x = 0 plane, where the target field has no in-plane part. A 1 cm grid cannot be
+    integrated through iron, so ψ is carried from the axis through the air only, and no lines are drawn in iron.
+  - *Direction only, evenly spaced.* Everywhere else, for example in the y = 0 plane of `solid_SIDIS_NH3`, where
+    the target field and the solenoid field add up in the plane. The lines follow the in-plane field direction at
+    an even spacing. They say nothing about the strength; the bands do.
 - **Arrows:** the field direction on a 50 cm grid, in air where |B| ≥ 1 G. They show the direction of the fringe
   field, where the field lines are far apart.
-- **Grey:** the iron of the magnet (volumes matching `--field-iron`, default the yoke). The map is not meaningful
+- **Dot or cross in a circle:** in place of an arrow where the field points mostly out of the page (dot) or into
+  it (cross).
+- **Grey:** the iron of the magnet (volumes matching `--field-iron`, default the yoke). The field is not meaningful
   inside it.
 
-`make_solid_views` takes the map from the configuration's field fragment (`compact/fields/field_*.xml`: its
-`field_map` and `scale`) and looks for it in `$DETECTOR_PATH/fieldmaps`, where the first load of the geometry
-downloads it. `--field MAP` names another map. The figures in `docs/images/field_yz_<config>.svg` were made with
+### Where the field comes from
+
+`solid_field_dump` asks DD4hep for the field of the configuration on the section plane: all its `<field>` overlays
+summed, with their positions and scale factors, on a 1 cm grid. The drawing therefore shows what the simulation
+uses. One plane takes about 2 s and 5 to 7 MB. `make_solid_views` runs it for the plane of each field view. By hand:
+
+```bash
+solid_field_dump --plane y=0 -o field.npz        # $DETECTOR_PATH/$DETECTOR_CONFIG.xml; or name a compact file
+solid_lineview scene.npz --mode section --section y=0 --view top --labels solid --field field.npz -o field.svg
+```
+
+`--field` also takes a GEMC 2D map directly (`SoLID_FieldMapB` format, axisymmetric about the beam axis), and
+`make_solid_views --field FILE` uses a given map or `field.npz` for its field views. For a configuration with the
+solenoid alone both give the same drawing: byte for byte for `solid_SIDIS_He3`, and within 0.1 % of the pixels
+for `solid_JPsi_lite`, where the map ends inside the drawing.
+
+The figures in `docs/images/field_yz_<config>.svg` were made with
 
 ```bash
 make_solid_views -c $c --views field_yz --formats svg --name '{view}_{config}' -o docs/images
 ```
 
-Limits:
+### The polarized NH₃ target
 
-- The map must be a GEMC 2D map that is axisymmetric about the beam axis (`SoLID_FieldMapB` with `BrBz`). Only this
-  map is drawn. The 5 T target magnet of `solid_SIDIS_NH3` is missing from its figure.
+`solid_SIDIS_NH3` adds the field of the target magnet (5 T at the target, along x) to the solenoid field. In the
+y = 0 plane both fields lie in the plane:
+
+![SIDIS NH3: total field around the target, y = 0 section seen from above](images/field_target_solid_SIDIS_NH3.svg)
+
+The whole detector in the same plane is [field_xz_solid_SIDIS_NH3.svg](images/field_xz_solid_SIDIS_NH3.svg). In
+the x = 0 plane ([field_yz_solid_SIDIS_NH3.svg](images/field_yz_solid_SIDIS_NH3.svg)) the target field points out
+of the page: the bands and the dots and crosses show it, and the field lines there are those of the solenoid.
+
+Two things these drawings show about the field the simulation uses:
+
+- The map of the target magnet ends 2 m from the target. The total field is still 84 G there on the magnet axis
+  and 44 G in its mid plane, and it drops to the 6 G of the solenoid fringe in the next centimetre. The straight
+  edges in the bands of the full views are this step.
+- The map is the Oxford design study (`compact/target/field_NH3_target.xml`); the magnet delivered to JLab has no
+  public map yet.
+
+### Limits
+
+- The field is sampled on a 1 cm grid, the grid of the maps. Bands and lines interpolate between the samples.
+- The default range of `solid_field_dump` is the box around the detector plus 1.5 m. A close-up further out needs
+  `--u-range` and `--v-range`.
 - The muon absorbers of the DDVCS configurations are not in the field model (they are not magnetized there), so
   they are not grey and the field runs through them as through air.
-- Field lines need a section plane through the beam axis and the python module `contourpy` (it comes with
-  matplotlib, and eic_xl has it). On other planes, such as `--section z=440cm`, the bands and arrows are still drawn.
+- Equal-flux lines need the python module `contourpy` (it comes with matplotlib, and eic_xl has it). The evenly
+  spaced lines need numpy only.
+- Evenly spaced lines are drawn where at least 30 % of the field lies in the plane. They are lines of the in-plane
+  field; where the field also has a part normal to the plane, the real field lines leave the plane.
 
 The `solid_lineview` options, for section mode:
 
 | option | effect |
 |---|---|
-| `--field MAP` | draw the field of this map under the section |
-| `--field-scale F` | factor on the map, as `scale` in the field fragment (−1 flips the polarity) |
-| `--field-lines N` | number of field lines (default 24, 0 for none); `--field-lw` sets their width |
-| `--field-arrows STEP` | spacing of the direction arrows (default `50cm`, 0 for none) |
+| `--field FILE` | draw this field under the section: a `field.npz` of `solid_field_dump` for the same plane, or a GEMC 2D map |
+| `--field-scale F` | factor on the field; for a map file, the `scale` of its field fragment (−1 flips the polarity) |
+| `--field-lines N` | equal-flux lines: their number; evenly spaced lines: their spacing is 1/N of the height (default 24, 0 for none); `--field-lw` sets their width |
+| `--field-arrows STEP` | spacing of the direction arrows and marks (default `50cm`, 0 for none) |
 | `--field-iron REGEX` | volumes treated as iron (default `(^|!)MagnetYoke`) |
+| `--fit-volumes REGEX`, `--fit-pad LEN` | close-up: fit the view to the box around the named volumes, widened by LEN; the drawing is clipped to that window (also in the line modes) |
 
 `magnet_field/plot_map.py` plots a map on its own, with the r-z model of the solver and the on-axis field
 ([magnet_field/README.md](../magnet_field/README.md#plotting-a-map)).
 
 ## Gallery (generated by `make_solid_views`, November 2026 geometry)
 
-| configuration | labelled overview (`overview`) | x = 0 section (`section_yz`) | cutaway, hidden lines removed (`cutaway`) | solenoid field (`field_yz`) |
+| configuration | labelled overview (`overview`) | x = 0 section (`section_yz`) | cutaway, hidden lines removed (`cutaway`) | magnetic field (`field_yz`) |
 |---|---|---|---|---|
 | SIDIS 3He | [svg](images/overview_solid_SIDIS_He3.svg) | [svg](images/solid_SIDIS_He3_section_yz.svg) | [svg](images/solid_SIDIS_He3_cutaway.svg) | [svg](images/field_yz_solid_SIDIS_He3.svg) |
-| SIDIS NH3 | [svg](images/overview_solid_SIDIS_NH3.svg) | [svg](images/solid_SIDIS_NH3_section_yz.svg) | | [svg](images/field_yz_solid_SIDIS_NH3.svg) |
+| SIDIS NH3 | [svg](images/overview_solid_SIDIS_NH3.svg) | [svg](images/solid_SIDIS_NH3_section_yz.svg) | | [svg](images/field_yz_solid_SIDIS_NH3.svg), [top view](images/field_xz_solid_SIDIS_NH3.svg), [target](images/field_target_solid_SIDIS_NH3.svg) |
 | PVDIS | [svg](images/overview_solid_PVDIS.svg) | [svg](images/solid_PVDIS_section_yz.svg) | [svg](images/solid_PVDIS_cutaway.svg) | [svg](images/field_yz_solid_PVDIS.svg) |
 | J/psi | [svg](images/overview_solid_JPsi.svg) | [svg](images/solid_JPsi_section_yz.svg) | | [svg](images/field_yz_solid_JPsi.svg) |
 | DDVCS | [svg](images/overview_solid_DDVCS.svg) | [svg](images/solid_DDVCS_section_yz.svg) | | [svg](images/field_yz_solid_DDVCS.svg) |
@@ -253,14 +319,12 @@ The `solid_lineview` options, for section mode:
 
 ![SIDIS 3He cutaway](images/solid_SIDIS_He3_cutaway.svg)
 
-The files in `docs/images` were made from DAWNFILE scenes with `solid_lineview` 0.2.0 to 0.4.0. Version 0.5.0
-treats faces lying in the cut plane x = 0 differently (see `--plane-snap` under [Rendering modes](#rendering-modes)):
-the stray slivers on the GEM planes are gone, the sections show the sector outlines on both sides, and some label
-positions change. The figures have not been regenerated for that. The overview, field and cutaway files are
-reproduced byte for byte, apart from the version comment, by
+The files in `docs/images` were made from the geometry scene with `solid_lineview` 0.6.0, in
+`containers/solid-shell`:
 
 ```bash
-make_solid_views -c $c --source dawnfile --views overview,field_yz --formats svg --name '{view}_{config}' -- --plane-snap 0
+make_solid_views -c $c --views overview,field_yz --formats svg --name '{view}_{config}' -o docs/images
+make_solid_views -c $c --views section_yz,cutaway --formats svg -o docs/images
 ```
 
 ## Rendering modes
@@ -282,8 +346,8 @@ file are drawn on top (`--no-traj`, `--no-hits` to suppress them). Other options
 **Faces in a cut or section plane.** The standard views cut at x = 0, and many SoLID volumes have a face exactly
 there (the sides of GEM, Cherenkov and calorimeter sectors). Whether such a face counts as cut used to depend on the
 last bits of its coordinates, so a section could lose some sector outlines and gain others. Since version 0.5.0
-`solid_lineview` moves every vertex closer than `--plane-snap` (default 1e-6 mm) to a cut or section plane off the
-plane by that distance, all such vertices of one solid to the same side:
+`solid_lineview` moves every vertex closer than `--plane-snap` (default 1e-3 mm since 0.6.0, 1e-6 mm before) to a cut
+or section plane off the plane by that distance, all such vertices of one solid to the same side:
 
 - section plane: a solid that touches the plane with a whole face is cut along that face, from whichever side it
   touches; a solid that touches with an edge or a corner is not cut;
@@ -292,37 +356,62 @@ plane by that distance, all such vertices of one solid to the same side:
 The x = 0 sections therefore show the outlines of the sectors on both sides of the plane. `--plane-snap 0` turns
 this off and gives the drawings of version 0.4.0.
 
+**Lines on top of each other.** Touching volumes share edges, a cut outline lies on the mesh edge under it, and
+edges at different depths can coincide in the projection. Up to version 0.5 each of them was drawn: in a
+hidden-line view about 70 % of the line pixels were drawn more than once, anti-aliased lines came out darker there,
+and whether the second copy appeared could depend on rounding. Since version 0.6.0 the pieces on one straight line
+are united before they are drawn; where line widths differ, the wider line is kept. The picture covers the same
+pixels with far fewer strokes: `lines_yz` of `solid_JPsi_lite` goes from 9727 to 1100 segments and its SVG from 274
+to 31 kB. `--keep-overdraw` gives the old output.
+
+**Close-ups.** `--fit-volumes REGEX` fits the view to the box around the volumes whose name matches, and
+`--fit-pad LEN` widens it; `--fit-box` gives the window directly. Sections and line drawings are clipped to the
+window. `make_solid_views --views field_target` uses this for the target region.
+
 Performance: one view of a full SoLID scene takes 2–10 s; the labelled overview is the slowest. Reading a
 `scene.npz` takes 0.3–0.5 s of that, parsing a DAWNFILE `.prim` 1.3–3.3 s.
 
 ## Checks
 
-All commands run inside `containers/solid-shell` (or any shell with `thissolid.sh` sourced). None is part of the
-CI workflow yet.
+All commands run inside `containers/solid-shell` (or any shell with `thissolid.sh` sourced). The CI workflow runs
+the three ctest checks in its build job and the reference hashes for every configuration.
 
 | check | command | what it verifies | time |
 |---|---|---|---|
 | unit test of the scene producer | `ctest -R scene_dump` in the build directory (runs `scripts/geometry/test_scene_dump.py`) | on `test/test_scene_dump.xml` (one volume placed twice, a rotated and a reflected placement of a solid without mirror symmetry, a parameterised volume): counts, depths and mothers, transforms, the mirrored mesh, volume IDs and masks, bounding sphere, reproducible hash, and that `solid_lineview` reads the `.npz` and the `.prim` to the same solids | 4 s |
+| field views and line clean-up | `ctest -R field_view` (runs `scripts/geometry/test_field_view.py`) | lines on top of each other are drawn once and windows clip; `solid_field_dump` gives DD4hep's field at 300 grid points of `solid_JPsi_lite` (within 1e-6 of the largest field) and the drawing interpolates to it in between; the solenoid field is recognised as axisymmetric; the drawing from the sampled field equals the one from the GEMC map within 0.3 % of the pixels; a close-up stays inside its window | 15–30 s |
 | reference hashes | `scripts/geometry/check_scene_hash.py` (all configurations) or `... solid_PVDIS` | the scene hash and the volume, drawn-volume and mesh counts of each configuration equal `scripts/geometry/scene_hashes.json`; after an intended change of geometry, colours or volume IDs run it with `--update` and commit the file | 3 s per configuration |
 | hits map to volumes | `scripts/geometry/check_scene_hits.py -c solid_JPsi_lite -n 3` | runs ddsim with `SOLID_SCENE`, then checks that every hit of every collection matches exactly one most specific drawn volume; readouts whose volumes are all invisible (the DDVCS muon observer planes) are listed and skipped | about 20 s |
 | scene against DAWNFILE | `scripts/geometry/compare_scene_dawnfile.py -c solid_PVDIS -o out` | volume count, names, depths, colours, bounding boxes and bounding sphere equal those of a DAWNFILE run; the four standard views rendered from both differ in at most 0.1 % of the pixels (`--max-diff`); diff images in `out/` | 45–70 s |
 
-The first two are cheap enough for every CI run. The other two start ddsim; two configurations (for example
-`solid_JPsi_lite` and `solid_PVDIS`) would be a reasonable CI sample.
+The last two start ddsim and are not in CI; two configurations (for example `solid_JPsi_lite` and `solid_PVDIS`)
+would be a reasonable sample.
 
 Results for the November 2026 geometry (eic_xl 26.10.0: DD4hep 1.38, Geant4 11.4.1):
 
 | configuration | volumes / drawn / meshes | scene / DAWNFILE file | section_yz | section_xz | cutaway | lines_yz |
 |---|---|---|---|---|---|---|
-| SIDIS 3He | 4598 / 4519 / 68 | 0.21 / 9.0 MB | 0.022 % | 0 | 0.021 % | 0.139 % |
-| SIDIS NH3 | 4615 / 4537 / 89 | 0.34 / 9.7 MB | 0.023 % | < 0.001 % | 0.025 % | 0.154 % |
-| PVDIS | 8846 / 8604 / 231 | 0.34 / 14.9 MB | 0 | 0 | 0 | 0.047 % |
-| J/psi | 4587 / 4512 / 64 | 0.20 / 8.9 MB | 0.020 % | 0 | 0.021 % | 0.171 % |
-| DDVCS | 4879 / 4794 / 72 | 0.21 / 9.0 MB | 0.020 % | 0 | 0.019 % | 0.252 % |
-| SoLID-Lite J/psi | 3580 / 3546 / 48 | 0.12 / 5.5 MB | 0 | 0 | 0 | 0.129 % |
-| SoLID-Lite DDVCS | 3872 / 3828 / 56 | 0.13 / 5.6 MB | 0 | 0 | 0 | 0.227 % |
+| SIDIS 3He | 4598 / 4519 / 68 | 0.21 / 9.0 MB | < 0.001 % | < 0.001 % | < 0.001 % | < 0.001 % |
+| SIDIS NH3 | 4615 / 4537 / 89 | 0.34 / 9.7 MB | < 0.001 % | < 0.001 % | < 0.001 % | 0.001 % |
+| PVDIS | 8846 / 8604 / 231 | 0.34 / 14.9 MB | 0.002 % | 0.003 % | < 0.001 % | 0.003 % |
+| J/psi | 4587 / 4512 / 64 | 0.20 / 8.9 MB | < 0.001 % | < 0.001 % | < 0.001 % | 0.001 % |
+| DDVCS | 4879 / 4794 / 72 | 0.21 / 9.0 MB | < 0.001 % | < 0.001 % | < 0.001 % | 0.004 % |
+| SoLID-Lite J/psi | 3580 / 3546 / 48 | 0.12 / 5.5 MB | 0 | 0 | 0 | 0 |
+| SoLID-Lite DDVCS | 3872 / 3828 / 56 | 0.13 / 5.6 MB | 0 | 0 | 0 | 0.003 % |
 
-Pixel columns: share of pixels that differ between the view rendered from the scene and from the DAWNFILE file.
+Pixel columns: share of pixels that differ between the view rendered from the scene and from the DAWNFILE file
+(`solid_lineview` 0.6.0; a pixel counts when a colour channel differs by more than 8/255). The largest difference
+is 149 pixels of 4.6 million; the limit of the comparison script is 0.1 %.
+
+With version 0.5 the differences were larger, for two reasons that 0.6.0 removes:
+
+- **`lines_yz` differed by 0.13 to 0.25 % in five configurations.** The two pictures had the same lines, but some
+  lay twice on top of each other in one picture and once in the other (see "Lines on top of each other" under
+  [Rendering modes](#rendering-modes)).
+- **The four configurations with the heavy-gas Cherenkov differed by 0.02 to 0.03 %** in the sections and the
+  cutaway. Two of its mirrors have a side face in the plane x = 0. In a DAWNFILE file the vertices of that face
+  are off the plane by more than 1e-6 mm and less than 1e-4 mm, a rounding effect of its text format, and
+  1e-6 mm was the `--plane-snap` distance of version 0.5. The default of 1e-3 mm covers this.
 
 The volume lists are identical in all seven configurations: same count, names (apart from the 330 PVDIS blades
 that DAWNFILE leaves unnamed), depths, colours, vertex and facet totals; bounding boxes agree within 1e-5 mm and
@@ -331,14 +420,6 @@ the bounding sphere within 1e-5 mm. The hit check passed for `solid_JPsi_lite`, 
 
 ## Known limits
 
-- **`lines_yz` differs between the two sources by more than the 0.1 % target** in five of the seven
-  configurations (0.13 to 0.25 % of the pixels; PVDIS 0.05 %). In this view the camera looks straight at the cut
-  plane x = 0. The differing pixels are whole outlines of volumes at that plane (a GEM plane, muon chambers, a yoke
-  edge) that one picture draws and the other does not; in the cases looked at, the scene picture had the extra
-  lines. The hidden-line result there reacts to very small coordinate changes: for `solid_JPsi_lite`, the scene
-  and a `.prim` written from it with 9 digits already differ by 0.07 % in this view and by nothing in the other
-  three. The cause inside the hidden-line code has not been tracked down. Sections and cutaway agree within
-  0.03 %.
 - **Events.** `make_solid_views -n EVENTS` draws events with the tools of [event_display.md](event_display.md);
   its limits are listed there. The DAWNFILE trajectories remain available with `--source dawnfile -n EVENTS`.
 - **Replicas.** The scene producer expands Geant4 replicas, but this is untested. No SoLID detector uses them, and
@@ -359,7 +440,8 @@ the bounding sphere within 1e-5 mm. The hit check passed for `solid_JPsi_lite`, 
 ## Alternatives that were evaluated
 
 * **dawn/dawncut** are still shipped in `eic_xl` (`/opt/local/bin/dawn`, `dawncut`), so the old pipeline keeps
-  working. It needs an X11/Tcl session and ps2pdf/gs post-processing.
+  working. The interactive panel needs an X11/Tcl session; the batch mode (`dawn -d`) does not, and writes EPS
+  that needs ps2pdf/gs post-processing.
 * **dusk/duskcut** (eic_xl, 2026) is EIC's OpenCascade-based DAWN replacement. It works on STEP files from
   `npdet_to_step`. It was tested in eic_xl 26.10 on the SoLID geometry of this repository, before and after the
   November 2026 rebuild. `npdet_to_step` dropped the octagonal (polyhedra) yoke barrel and the old boolean

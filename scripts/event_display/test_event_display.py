@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LGPL-3.0-or-later
-"""Smoke test of the event display chain: recorder -> solid_evexport -> solid_evview (1 event, 2 views).
+"""Smoke test of the event display chain: recorder -> solid_evexport -> solid_evview (1 gun event, 2 views;
+3 events from a generator file).
 
 usage (inside eic-shell / solid-shell; ctest runs it as test `event_display`):
     test_event_display.py [-c CONFIG] [-o OUTDIR] [--keep]
@@ -12,9 +13,14 @@ Steps, each checked:
   4. solid_evview: side and beam views as SVG and PNG; the SVG is well-formed and holds the track colour
   5. solid_evview --animate with 8 frames: GIF with 8 frames whose last frame is the static figure, and a
      well-formed animated SVG; MP4 is requested too and must be skipped without an error when no ffmpeg exists
+  6. without ddsim: a primary that the generator decayed (no track length) passes the "generator particle"
+     flag on to its daughters and no further; --select pair needs the two leptons to have one parent
+  7. generator input: 3 toy J/psi events (toy_jpsi.py) numbered 40 to 42 through ddsim --inputFiles; the
+     EDM4hep file, the trajectory file and the event files carry these numbers, the generator particles start
+     in the target, and solid_evexport refuses a file in which two events have the same number
 
 Needs the built plugins on LD_LIBRARY_PATH, DETECTOR_PATH, and the python packages of this repository
-(found next to this script in a source checkout). About 30 s. Exit status 0 = passed.
+(found next to this script in a source checkout). About 50 s. Exit status 0 = passed.
 """
 import argparse
 import json
@@ -135,6 +141,84 @@ def main():
         diff = float(np.abs(last - ref).mean()) if same else 255.0
         check(same and diff < 2.0, 'last GIF frame equals the static figure (mean difference %.2f of 255, palette '
               'rounding)' % diff)
+    # 6 ---------------------------------------------------------------------------------------------
+    from solid_evdisplay.event import Event, lepton_pair
+    fake = {k: getattr(ev, k) for k in ('hit_collection', 'hit_cellid', 'hit_node', 'hit_energy', 'hit_time',
+                                         'hit_pos', 'hit_particle', 'dep_hit', 'dep_time', 'dep_energy', 'dep_pdg',
+                                         'vol_node', 'vol_collection', 'vol_energy', 'vol_hits', 'mc_pdg',
+                                         'mc_gen_status', 'mc_sim_status', 'mc_charge', 'mc_mass', 'mc_time',
+                                         'mc_vertex', 'mc_momentum', 'mc_parent')}
+    # tracks: 1 = J/psi (parent 0, no length), 2 and 3 = its leptons, 4 = a secondary of 2, 5 = a proton (parent 0)
+    pos = np.array([[0, 0, -3150], [0, 0, -3150], [0, 0, -3150], [50, 0, -2000], [0, 0, -3150], [-50, 0, -2000],
+                    [40, 0, -2100], [45, 0, -2050], [0, 0, -3150], [0, 80, -2500]], np.float32)
+    fake.update(trk_id=np.array([1, 2, 3, 4, 5], np.int32), trk_parent=np.array([0, 1, 1, 2, 0], np.int32),
+                trk_pdg=np.array([443, 11, -11, 22, 2212], np.int32), trk_ekin=np.full(5, 100.0, np.float32),
+                trk_offset=np.array([0, 2, 4, 6, 8, 10], np.int64), pt_pos=pos,
+                pt_time=np.zeros(10, np.float32), pt_ekin=np.zeros(10, np.float32))
+    gen = view.generator_tracks(Event(fake, ev.meta))
+    check(gen.tolist() == [True, True, True, False, True],
+          'generator particles: the J/psi, its leptons and the proton, not the secondary (%s)' % gen.tolist())
+    gem = next((i for i, c in enumerate(ev.collections) if 'GEM' in c['name']), None)
+    if check(gem is not None, 'a GEM collection for the pair selection'):
+        def pair_event(parents):
+            f = dict(fake, mc_pdg=np.array([443, 11, -11, 11], np.int32),
+                     mc_gen_status=np.array([2, 1, 1, 1], np.int32), mc_parent=np.array(parents, np.int32),
+                     hit_collection=np.full(6, gem, np.int16), hit_particle=np.array([2, 2, 2, 3, 3, 3], np.int32))
+            for k, dt in (('hit_cellid', np.uint64), ('hit_node', np.int32), ('hit_energy', np.float32),
+                          ('hit_time', np.float32)):
+                f[k] = np.zeros(6, dt)
+            f['hit_pos'] = np.zeros((6, 3), np.float32)
+            return Event(f, ev.meta)
+        # hits on the e+ (index 2) and on the scattered e- (index 3), none on the decay e- (index 1)
+        check(not lepton_pair(pair_event([-1, 0, 0, -1])),
+              'pair: a scattered electron does not replace the decay electron')
+        check(lepton_pair(pair_event([-1, 0, 0, 0])), 'pair: e+ and e- with the same parent and 3 GEM hits each')
+    # 7 ---------------------------------------------------------------------------------------------
+    gdir = os.path.join(out, 'generator')
+    os.makedirs(gdir, exist_ok=True)
+    toy, gsim, gtraj = (os.path.join(gdir, f) for f in ('toy.hepmc', 'sim.edm4hep.root', 'traj.bin'))
+    r = subprocess.run([sys.executable, os.path.join(HERE, 'toy_jpsi.py'), '-n', '3', '--seed', '5', '--first-event',
+                        '40', '--lepton-theta', '10', '24', '-o', toy], stdout=subprocess.DEVNULL, check=False)
+    cmd = ['ddsim', '--steeringFile', os.path.join(path, 'steering', 'solid_sim.py'), '--compactFile',
+           os.path.join(path, a.config + '.xml'), '-N', '3', '--random.seed', str(a.seed), '--inputFiles', toy,
+           '--outputFile', gsim]
+    env = dict(os.environ, SOLID_TRAJ=gtraj, SOLID_OPTICAL='0', SOLID_GUN='0', DETECTOR_CONFIG=a.config)
+    env.pop('SOLID_SCENE', None)
+    with open(os.path.join(gdir, 'ddsim.log'), 'w') as log:
+        r2 = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, env=env, cwd=gdir, check=False)
+    if check(r.returncode == 0 and r2.returncode == 0 and os.path.isfile(gsim) and os.path.isfile(gtraj),
+             'ddsim read 3 toy J/psi events (log: %s/ddsim.log)' % gdir):
+        gpts = trajfile.read_trajectories(gtraj)
+        check(sorted(set(gpts['event'].tolist())) == [40, 41, 42],
+              'the trajectory file carries the event numbers of the generator file (%s)'
+              % sorted(set(gpts['event'].tolist())))
+        gev = os.path.join(gdir, 'events')
+        check(export.main([gsim, '--scene', scene, '--traj', gtraj, '-o', gev, '-q']) == 0
+              and sorted(os.listdir(gev)) == ['event_%06d.npz' % n for n in (40, 41, 42)],
+              'solid_evexport: event files 40 to 42')
+        ok = os.path.isfile(os.path.join(gev, 'event_000041.npz'))
+        if ok:
+            e41 = load_event(os.path.join(gev, 'event_000041.npz'))
+            g = view.generator_tracks(e41)
+            start = e41.pt_pos[e41.trk_offset[:-1][g]]
+            ok = (int(g.sum()) == 3 and sorted(e41.trk_pdg[g].tolist()) == [-11, 11, 2212]
+                  and bool(np.all((start[:, 2] > -3226.0) & (start[:, 2] < -3074.0))))
+        check(ok, 'event 41: e+, e- and proton recorded as generator particles, starting in the target cell')
+        # the same events with one number for all, as lAger writes them
+        with open(toy) as f:
+            text = f.read()
+        dup = os.path.join(gdir, 'toy_same_number.hepmc')
+        with open(dup, 'w') as f:
+            f.write(text.replace('E 41 ', 'E 40 ').replace('E 42 ', 'E 40 '))
+        dsim = os.path.join(gdir, 'same_number.edm4hep.root')
+        env.pop('SOLID_TRAJ')
+        with open(os.path.join(gdir, 'ddsim_same_number.log'), 'w') as log:
+            subprocess.run(cmd[:-3] + [dup, '--outputFile', dsim], stdout=log, stderr=subprocess.STDOUT, env=env,
+                           cwd=gdir, check=False)
+        check(os.path.isfile(dsim)
+              and export.main([dsim, '--scene', scene, '-o', os.path.join(gdir, 'none'), '-q']) == 1
+              and not os.path.isdir(os.path.join(gdir, 'none')),
+              'solid_evexport refuses a file whose events share one number')
     json.dump(dict(failed=FAILED), open(os.path.join(out, 'result.json'), 'w'))
     if not a.keep and not a.outdir and not FAILED:
         shutil.rmtree(out, ignore_errors=True)

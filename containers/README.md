@@ -43,6 +43,7 @@ Then build and set up as in "Quick start" in the top-level README. The image is 
 |---|---|
 | ffmpeg | MP4 output of the event-display animations |
 | gmsh (and libXcursor, libXinerama) | the field solver, `magnet_field/solve_rz.py` |
+| lAger 3.7.0 that starts, in `/opt/lager` | J/ψ events ([docs/event_display.md](../docs/event_display.md#generators)) |
 | solid_dd4hep in `/opt/solid` | `ddsim` works without building anything |
 | Gaudi and k4FWCore, only with `--build-arg WITH_GAUDI=1` | reconstruction studies ([docs/reconstruction.md](../docs/reconstruction.md)) |
 
@@ -60,10 +61,41 @@ containers/solid-shell -c solid_JPsi_lite          # the preinstalled geometry
   uses that instead of `/opt/solid`. `-p PREFIX` names another install.
 - `--solid-xl OWNER` takes the image from `ghcr.io/OWNER/solid_xl`, for example a fork's or JeffersonLab's.
 
+### lAger
+
+eic_xl 26.10 ships [lAger](https://eicweb.phy.anl.gov/monte_carlo/lager) 3.7.0, the Argonne generator for
+exclusive vector-meson production, but its `lager` ends in a segmentation fault before `main()`: lAger registers
+a stable particle with the code -9999, and `TDatabasePDG::AddParticle` of ROOT 6.38 and later reads the stability
+of the particle with the opposite sign without checking that it exists. The image therefore builds the same
+release again with one added statement ([patches/lager-3.7.0-root-6.40.patch](patches/lager-3.7.0-root-6.40.patch))
+into `/opt/lager` and puts `/opt/lager/bin` first on `PATH`; lAger's example configurations are in
+`/opt/lager/share/lager/examples`. The eic_xl copy in `/opt/local` is left as it is.
+
+In plain eic_xl (no solid_xl image), the same build takes four minutes:
+
+```bash
+mkdir lager && cd lager                            # anywhere outside the repository
+curl -fsSLO https://eicweb.phy.anl.gov/monte_carlo/lager/-/archive/3.7.0/lager-3.7.0.tar.gz
+echo "3ba025b744caae17e7109d8f8a19edd3e2ffdd79d07ff692373f15e92310f2f5  lager-3.7.0.tar.gz" | sha256sum -c -
+mkdir src && tar -xzf lager-3.7.0.tar.gz -C src --strip-components=1
+spack_pkg=/opt/spack-packages/repos/eic-spack/spack_repo/eic/packages/lager
+patch -d src -p1 < $spack_pkg/fix-photospp-includes.patch
+patch -d src -p1 < <repository>/containers/patches/lager-3.7.0-root-6.40.patch
+cmake -S src -B build -DCMAKE_INSTALL_PREFIX=$PWD/install -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_MODULE_PATH=$spack_pkg -DHEPMC_DIR=/opt/local -DPHOTOSPP_DIR=/opt/local \
+      -DCMAKE_INSTALL_RPATH=$PWD/install/lib \
+      -DCMAKE_EXE_LINKER_FLAGS=-Wl,--disable-new-dtags -DCMAKE_SHARED_LINKER_FLAGS=-Wl,--disable-new-dtags
+cmake --build build -j4 && cmake --install build
+export PATH=$PWD/install/bin:$PATH                 # ahead of /opt/local/bin
+```
+
+The two linker flags make the library path an `RPATH`, which is searched before `LD_LIBRARY_PATH`; without them
+the new `lager` loads the libraries in `/opt/local/lib` and crashes like the old one.
+
 ### Publishing
 
-`.github/workflows/image.yml` builds the image from `containers/Dockerfile`, tests it (ffmpeg, gmsh, loading
-`solid_JPsi_lite.xml` and its field) and pushes it to the container registry of the repository's owner:
+`.github/workflows/image.yml` builds the image from `containers/Dockerfile`, tests it (ffmpeg, gmsh, `lager --help`,
+loading `solid_JPsi_lite.xml` and its field) and pushes it to the container registry of the repository's owner:
 
 | trigger | published as |
 |---|---|

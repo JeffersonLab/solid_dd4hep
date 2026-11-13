@@ -118,20 +118,47 @@ class Track:
         return self.parent == 0
 
 
+def generator_tracks(ev):
+    """bool per recorded track: a particle of the generator.  These are the Geant4 primaries (parent 0) and
+    the decay products of a primary that the generator already decayed: Geant4 gets a J/psi with its e+ e-
+    as one primary, tracks it over no distance and starts the leptons as its secondaries."""
+    n = len(ev.trk_id)
+    gen = np.asarray(ev.trk_parent) == 0
+    if not gen.any() or gen.all():
+        return gen
+    index = {int(t): k for k, t in enumerate(ev.trk_id)}
+    off = ev.trk_offset
+    nolength = np.zeros(n, bool)
+    for k in np.nonzero(gen)[0]:
+        P = ev.pt_pos[int(off[k]):int(off[k + 1])]
+        nolength[k] = len(P) < 2 or float(np.abs(P - P[0]).max()) < 1e-3          # mm
+    while True:                                                                    # chains of resonances
+        new = [k for k in range(n) if not gen[k] and index.get(int(ev.trk_parent[k]), -1) >= 0
+               and gen[index[int(ev.trk_parent[k])]] and nolength[index[int(ev.trk_parent[k])]]]
+        if not new:
+            return gen
+        for k in new:
+            gen[k] = True
+            P = ev.pt_pos[int(off[k]):int(off[k + 1])]
+            nolength[k] = len(P) < 2 or float(np.abs(P - P[0]).max()) < 1e-3
+
+
 def event_tracks(ev, a):
-    """the recorded tracks worth drawing: all primaries, secondaries above the thresholds of their type"""
+    """the recorded tracks worth drawing: all generator particles (drawn as primaries), secondaries above
+    the thresholds of their type"""
     out = []
     emin = {"gamma": a.emin_gamma, "neutral": a.emin_neutral}
     npts = np.diff(ev.trk_offset)
+    gen = generator_tracks(ev)
     for k in range(len(ev.trk_id)):
         if npts[k] < 2:
             continue
         kind = particle_kind(int(ev.trk_pdg[k]))
-        if ev.trk_parent[k] != 0 and ev.trk_ekin[k] < emin.get(kind, a.emin):
+        if not gen[k] and ev.trk_ekin[k] < emin.get(kind, a.emin):
             continue
         P, T = ev.track(k)
-        out.append(Track(int(ev.trk_parent[k]), int(ev.trk_pdg[k]), P.astype(float), T.astype(float),
-                         float(ev.trk_ekin[k]), kind))
+        out.append(Track(0 if gen[k] else int(ev.trk_parent[k]), int(ev.trk_pdg[k]), P.astype(float),
+                         T.astype(float), float(ev.trk_ekin[k]), kind))
     return out
 
 
@@ -588,10 +615,11 @@ class EventView:
     def track_polylines(self, tmax=None):
         """[(kind, primary, polyline px)] of the tracks up to time tmax (None: complete)"""
         out = []
+        frame = (0.0, float(self.title_band), float(self.W), float(self.H))    # below the title, inside the canvas
         for kind, prim, xy, T in self.track_pieces():
             P = clip_track_time(xy, T, tmax)
             if len(P) >= 2:
-                out.append((kind, prim, P))
+                out += [(kind, prim, q) for q in lv.clip_polyline_rect(P, frame)]
         return out
 
     def _add_tracks(self, dl, tmax):

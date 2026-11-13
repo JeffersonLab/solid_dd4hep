@@ -18,6 +18,9 @@ Environment switches (all optional):
                         SOLID_TRAJ_MINEKIN=E keeps secondaries born with at least E MeV (default 5);
                         SOLID_TRAJ_MAXDIST (mm, default 20) and SOLID_TRAJ_MAXANGLE (rad, default 0.04) set the
                         point spacing. Works with -j N: all threads write the one file.
+                        SOLID_TRAJ_EVERY=N (or N:R) records only the events whose number is 0 (or R) modulo N.
+                        SOLID_TRAJ_TIMING=FILE appends the CPU time of every event to FILE
+                        (scripts/event_display/recorder_overhead.py).
 Command-line options of ddsim override everything set here.
 """
 import os
@@ -107,6 +110,8 @@ if _scene:
 # touch the particle handler, so the MCParticle content of the output is the same with and without it.
 _traj = os.environ.get('SOLID_TRAJ', '')
 if _traj and _traj != '0':
+    _every = (os.environ.get('SOLID_TRAJ_EVERY', '1') + ':0').split(':')
+    _timing = os.environ.get('SOLID_TRAJ_TIMING', '')
     SIM.action.step = {
         'name': 'SoLIDTrajectoryRecorder/TrajectoryRecorder',
         'parameter': {
@@ -114,6 +119,9 @@ if _traj and _traj != '0':
             'MinEkin': float(os.environ.get('SOLID_TRAJ_MINEKIN', '5')),
             'MaxDistance': float(os.environ.get('SOLID_TRAJ_MAXDIST', '20')),
             'MaxAngle': float(os.environ.get('SOLID_TRAJ_MAXANGLE', '0.04')),
+            'Every': int(_every[0]),
+            'Remainder': int(_every[1]),
+            'TimingFile': os.path.abspath(_timing) if _timing else '',
         },
     }
 

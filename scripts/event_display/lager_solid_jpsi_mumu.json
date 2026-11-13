@@ -1,0 +1,128 @@
+{
+  "SPDX-License-Identifier": "GPL-3.0-or-later",
+  "comment": "lAger 3.7.0 configuration: exclusive J/psi electroproduction on the proton at 11 GeV, J/psi -> mu+ mu-, for SoLID. The parameters are those of lAger's examples/solid/solid.ep-2gluon.json (SoLID pCDR; lAger is GPL-3.0-or-later, hence the licence of this file); changed here: the vertex range is the 15 cm LH2 cell in the hall frame (z = -322.5 to -307.5 cm), the number of events replaces the luminosity, HepMC3 output is on, the decay leptons are muons (also in the acceptance cuts). Run: lager -c THIS_FILE -r SEED -e EVENTS -o OUTDIR, then hepmc_prepare.py. See docs/event_display.md.",
+  "mc": {
+    "type": "solid",
+    "tag": "jpsi-mumu",
+    "events": "1000",
+    "output_hepmc": "true",
+    "generator": {
+      "type": "ep-2gluon",
+      "vertex": {
+        "type": "linear",
+        "range": [
+          "-322.5",
+          "-307.5"
+        ]
+      },
+      "beam": {
+        "lepton": {
+          "type": "constant",
+          "particle_type": "e-",
+          "dir": [
+            "0",
+            "0",
+            "1"
+          ],
+          "energy": "11.0"
+        },
+        "ion": {
+          "type": "constant",
+          "particle_type": "proton",
+          "dir": [
+            "0",
+            "0",
+            "-1"
+          ],
+          "energy": "0.9382721"
+        }
+      },
+      "target": {
+        "type": "primary"
+      },
+      "photon": {
+        "type": "vphoton",
+        "y_range": [
+          "0.6",
+          "1"
+        ]
+      },
+      "process_0": {
+        "type": "brodsky_2vmX",
+        "vm_type": "J/psi",
+        "recoil_type": "proton",
+        "photo_b": "1.13",
+        "photo_c2g": "6.55489e3",
+        "photo_c3g": "3.53511e3",
+        "R_vm_c": "2.164",
+        "R_vm_n": "2.131",
+        "dipole_n": "2.575"
+      }
+    },
+    "detector": {
+      "type": "composite",
+      "components": {
+        "forward": {
+          "id": "1",
+          "name": "forward",
+          "type": "cone",
+          "acceptance": {
+            "acceptance": "1.0",
+            "p": [
+              "1",
+              "11"
+            ],
+            "theta": [
+              "8",
+              "16"
+            ],
+            "pid": [
+              "mu+",
+              "mu-",
+              "proton"
+            ]
+          },
+          "smearing": {
+            "p": "0.0",
+            "theta": "0.0",
+            "phi": "0.0"
+          }
+        },
+        "wide": {
+          "id": "2",
+          "name": "wide",
+          "type": "cone",
+          "acceptance": {
+            "acceptance": "1.0",
+            "p": [
+              "1",
+              "11"
+            ],
+            "theta": [
+              "18.3",
+              "28.5"
+            ],
+            "pid": [
+              "mu+",
+              "mu-",
+              "proton"
+            ]
+          },
+          "smearing": {
+            "p": "0.0",
+            "theta": "0.0",
+            "phi": "0.0"
+          }
+        }
+      }
+    },
+    "reconstruction": {
+      "require_leading": "true"
+    },
+    "decay": {
+      "vm_decay_lepton_type": "13",
+      "vm_branching_ratio": "0.05961",
+      "do_radiative_decay_vm": "true"
+    }
+  }
+}

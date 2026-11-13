@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LGPL-3.0-or-later
-"""Toy generator of J/psi -> e+ e- (or mu+ mu-) events for event displays. NOT a physics generator.
+"""Toy generator of J/psi -> e+ e- (or mu+ mu-) events for tests of the event display. NOT a physics
+generator: for real events use lAger (docs/event_display.md, "Generators").
 
 usage:
     toy_jpsi.py -n 100 -o jpsi_toy.hepmc [--seed 1] [--lepton e|mu] [--beam-energy 11] [--vertex-z -315]
-                [--target-length 15] [--lepton-theta MIN MAX]
+                [--target-length 15] [--lepton-theta MIN MAX] [--first-event 0]
     SOLID_GUN=0 ddsim --steeringFile $DETECTOR_PATH/steering/solid_sim.py --inputFiles jpsi_toy.hepmc -N 100 ...
 
 It writes HepMC3 ASCII events of exclusive photoproduction, gamma p -> J/psi p -> l+ l- p, with a kinematic
@@ -115,6 +116,7 @@ def main():
     ap.add_argument('--target-length', type=float, default=15.0, help='cm (default 15)')
     ap.add_argument('--lepton-theta', type=float, nargs=2, default=None, metavar=('MIN', 'MAX'),
                     help='keep events with both leptons in this polar-angle range, degrees')
+    ap.add_argument('--first-event', type=int, default=0, help='event number of the first event (default 0)')
     a = ap.parse_args()
     rng = np.random.default_rng(a.seed)
     ml, code = M_LEPTON[a.lepton], PDG_LEPTON[a.lepton]
@@ -132,7 +134,7 @@ def main():
                     sys.exit('toy_jpsi: no event passes --lepton-theta')
             vx, vy = rng.normal(0.0, 1.0, 2)
             vz = 10.0 * (a.vertex_z + a.target_length * (rng.random() - 0.5))
-            out.write('E %d 1 5\nU GEV MM\n' % i)
+            out.write('E %d 1 5\nU GEV MM\n' % (a.first_event + i))
             rows = [(1, 0, 22, g, 0.0, 4), (2, 0, 2212, p, M_P, 4), (3, -1, -code, lp, ml, 1),
                     (4, -1, code, lm, ml, 1), (5, -1, 2212, pr, M_P, 1)]
             for pid, vtx, pdg, v, m, status in rows[:2]:

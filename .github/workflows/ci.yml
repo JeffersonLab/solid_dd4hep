@@ -29,9 +29,9 @@ jobs:
             cmake -B build -S . -DCMAKE_INSTALL_PREFIX=${PWD}/install
             cmake --build build -j4
             cmake --install build
-            # geometry scene of a small test geometry; one simulated event exported, drawn and animated
-            # (the load_* tests are covered by the geometry job below)
-            ctest --test-dir build -R 'scene_dump|event_display' --output-on-failure
+            # geometry scene of a small test geometry; field sampling and field views; one simulated event
+            # exported, drawn and animated (the load_* tests are covered by the geometry job below)
+            ctest --test-dir build -R 'scene_dump|field_view|event_display' --output-on-failure
       - uses: actions/upload-artifact@v4
         with:
           name: install
@@ -88,7 +88,8 @@ jobs:
           run: |
             source install/bin/thissolid.sh ${{ matrix.config }}
             bin/make_solid_views -c ${{ matrix.config }} -o doc/views \
-                --views section_yz,section_xz,cutaway,lines_yz,overview,field_yz || echo "views failed (non-fatal)"
+                --views section_yz,section_xz,cutaway,lines_yz,overview,field_yz,field_xz,field_target \
+                || echo "views failed (non-fatal)"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

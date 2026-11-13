@@ -8,7 +8,9 @@
   B(0,0) = +49996 G along +x; maximum 8.62 T near the coils. GEMC solid_SIDIS_NH3_moved_full uses it with
   DISPLACE_FIELDMAP 0,0,-350 cm (gemc ignores the header <shift>), restricted to a 130 cm air box around the target
   where it REPLACES the solenoid field; here it is a global overlay (the CLEO fringe field at the target, ~27 G, is
-  negligible against 5 T; the map ends at |x| = 200 cm, r = 199 cm).
+  negligible against 5 T; the map ends at |x| = 200 cm, r = 199 cm, where its field is still 84 G on the magnet
+  axis and 44 G in the mid plane: the total field steps down to the solenoid fringe (6 G) there, see
+  docs/images/field_xz_solid_SIDIS_NH3.svg).
   Caveats: (1) this is the Oxford design map; the installed Scientific-Magnetics magnet (SM2023 geometry, default of
   target_NH3.xml) has no public map yet (GEMC runs SM2023 without target field); (2) the 5 T field deflects the
   incoming and outgoing beam (no chicane is modelled); (3) needs the SoLID_FieldMapB with header/symmetry support

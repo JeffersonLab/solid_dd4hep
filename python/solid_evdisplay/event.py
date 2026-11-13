@@ -79,8 +79,10 @@ def find_event_files(paths):
 
 
 def lepton_pair(ev, pdg=11, min_tracker_hits=3):
-    """True if the generator particles hold a lepton and an antilepton that both leave at least
-    min_tracker_hits hits in the GEM collections (hits linked to the generator particle itself)."""
+    """True if the generator particles hold a lepton and an antilepton from the same parent that both leave
+    at least min_tracker_hits hits in the GEM collections (hits linked to the generator particle itself).
+    The common parent keeps the scattered beam electron of an electroproduction event from standing in for
+    the decay electron."""
     gem = np.array(["GEM" in c["name"] for c in ev.collections], bool)
     if not gem.any() or len(ev.hit_collection) == 0:
         return False
@@ -89,8 +91,8 @@ def lepton_pair(ev, pdg=11, min_tracker_hits=3):
     for i in ev.generator_particles():
         code = int(ev.mc_pdg[i])
         if abs(code) == pdg and int((part == i).sum()) >= min_tracker_hits:
-            found[code] = True
-    return pdg in found and -pdg in found
+            found.setdefault(code, set()).add(int(ev.mc_parent[i]))
+    return bool(found.get(pdg, set()) & found.get(-pdg, set()))
 
 
 def passes(ev, select=None, min_energy=None, min_tracker_hits=3):

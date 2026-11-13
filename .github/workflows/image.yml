@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
-# Build the solid_xl image (containers/Dockerfile: eic_xl + ffmpeg + gmsh + this repository) and publish it to the
+# Build the solid_xl image (containers/Dockerfile: eic_xl + ffmpeg + gmsh + lAger + this repository) and publish it to the
 # GitHub container registry of the repository owner: ghcr.io/<owner>/solid_xl.
 #
 #   - a pushed tag v*      -> ghcr.io/<owner>/solid_xl:<tag> and :latest
@@ -14,7 +14,7 @@ on:
   push:
     tags: ["v*"]
   pull_request:
-    paths: ["containers/Dockerfile", "containers/profile.d/**", "containers/spack-gaudi.yaml", ".github/workflows/image.yml"]
+    paths: ["containers/Dockerfile", "containers/profile.d/**", "containers/patches/**", "containers/spack-gaudi.yaml", ".github/workflows/image.yml"]
   workflow_dispatch:
     inputs:
       eic_tag:
@@ -68,6 +68,8 @@ jobs:
             set -e
             ffmpeg -version | head -1
             python3 -c "import gmsh; gmsh.initialize(); print(\"gmsh\", gmsh.__version__); gmsh.finalize()"
+            test "$(command -v lager)" = /opt/lager/bin/lager
+            lager --help > /dev/null && echo "lager: starts"
             echo "DETECTOR_PATH=${DETECTOR_PATH} DETECTOR_CONFIG=${DETECTOR_CONFIG}"
             test -f "${DETECTOR_PATH}/${DETECTOR_CONFIG}.xml"
             python3 -c "

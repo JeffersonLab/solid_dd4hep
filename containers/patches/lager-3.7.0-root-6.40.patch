@@ -1,0 +1,29 @@
+SPDX-License-Identifier: GPL-3.0-or-later
+
+lAger 3.7.0 (https://eicweb.phy.anl.gov/monte_carlo/lager, GPL-3.0-or-later): start with ROOT 6.40.
+
+lAger registers its particle "Unknown" in a TDatabasePDG with the code -9999 and stable = true. Since
+ROOT 6.38 (not yet in 6.36; eic_xl 26.10 has 6.40.04), TDatabasePDG::AddParticle takes the stability of a
+stable particle with a negative code from the particle with the opposite sign and does not check that this
+particle exists (the block marked "Fix ROOT-6889"): the null pointer is dereferenced in the static
+initializer of liblager_core, and every lager command ends in a segmentation fault before main().
+Registering a partner with the code +9999 first avoids it and changes nothing else: the code, name and
+stability of "Unknown" stay the same.
+
+Applied by containers/Dockerfile after the patch of the eic-spack recipe (fix-photospp-includes.patch).
+Upstream: lAger issue 23 (open); pdg.cc is unchanged on the master branch as of 2026-11-12.
+
+--- a/src/lager/core/pdg.cc
++++ b/src/lager/core/pdg.cc
+@@ -68,6 +68,11 @@
+     db_->AddParticle("Pc_iso_32m", "P_{c} (3/2-)", 0, false, 0, 3, "pentaquark",
+                      static_cast<int32_t>(pdg_id::Pc_iso_32m));
+     // Unknown
++    // (ROOT 6.38+: AddParticle for a stable particle with a negative code reads
++    // the stability of the particle with the opposite sign without checking
++    // that it exists, and crashes if it does not; give it one)
++    db_->AddParticle("Unknown+", "Unknown (partner)", 0, true, 0, 0, "Unknown",
++                     -static_cast<int32_t>(pdg_id::unknown));
+     db_->AddParticle("Unknown", "Unknown", 0, true, 0, 0, "Unknown",
+                      static_cast<int32_t>(pdg_id::unknown));
+   }

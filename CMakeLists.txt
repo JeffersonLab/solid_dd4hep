@@ -71,6 +71,17 @@ target_link_libraries(solid_scene_dump PRIVATE DD4hep::DDCore)
 target_compile_options(solid_scene_dump PRIVATE -Wall -Wextra)
 install(TARGETS solid_scene_dump RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
+# solid_field_dump <compact> --plane x=0 -o field.npz: the total magnetic field on a section plane, for the field
+# views of make_solid_views (solid_lineview --field field.npz)
+add_executable(solid_field_dump ${PROJECT_SOURCE_DIR}/src/sim/solid_field_dump.cpp)
+target_link_libraries(solid_field_dump PRIVATE DD4hep::DDCore ROOT::Core ROOT::Geom)
+target_compile_options(solid_field_dump PRIVATE -Wall -Wextra)
+if(ZLIB_FOUND)
+  target_link_libraries(solid_field_dump PRIVATE ZLIB::ZLIB)
+  target_compile_definitions(solid_field_dump PRIVATE SOLID_HAVE_ZLIB)
+endif()
+install(TARGETS solid_field_dump RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
 #-----------------------------------------------------------------------------------
 # Install the detector description: compact fragments, top-level configurations, field maps
 set(SOLID_SHARE_DIR ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME})
@@ -135,6 +146,20 @@ if(BUILD_TESTING)
                     --compact ${PROJECT_SOURCE_DIR}/test/test_scene_dump.xml
   )
   set_tests_properties(scene_dump PROPERTIES TIMEOUT 300 LABELS scene)
+
+  # field views: line clean-up and window clipping of solid_lineview, solid_field_dump against DD4hep's field,
+  # the drawing from the sampled field against the drawing from the GEMC map
+  add_test(NAME field_view
+    COMMAND ${CMAKE_COMMAND} -E env
+            DETECTOR_PATH=${PROJECT_SOURCE_DIR}
+            LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}
+            PYTHONPATH=${PROJECT_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+            PYTHONDONTWRITEBYTECODE=1
+            python3 ${PROJECT_SOURCE_DIR}/scripts/geometry/test_field_view.py
+                    --tool $<TARGET_FILE:solid_field_dump> --scene-tool $<TARGET_FILE:solid_scene_dump>
+                    --config solid_JPsi_lite
+  )
+  set_tests_properties(field_view PROPERTIES TIMEOUT 1800 LABELS "scene;field")
 
   # event display chain: 1 gun event with the trajectory recorder, solid_evexport, solid_evview (2 views and a
   # short animation). Uses ddsim, about 30 s.

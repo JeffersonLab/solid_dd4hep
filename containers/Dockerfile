@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
-# solid_xl: the EIC software image (eic_xl) + the SoLID geometry (solid_dd4hep), optional Gaudi/k4FWCore.
+# solid_xl: the EIC software image (eic_xl) + ffmpeg, gmsh, a working lAger + the SoLID geometry (solid_dd4hep),
+# optional Gaudi/k4FWCore.
 #
 #   docker build -f containers/Dockerfile -t solid_xl:dev .                       # from the repository root
 #   docker build -f containers/Dockerfile --build-arg EIC_TAG=26.11.0-stable -t solid_xl:dev .
@@ -37,6 +38,32 @@ RUN apt-get update && \
     ffmpeg -version | head -1 && \
     command -v python3 cmake ddsim && \
     python3 -c "import gmsh; gmsh.initialize(); print('gmsh', gmsh.__version__); gmsh.finalize()"
+
+# lAger 3.7.0 (Argonne l/A event generator: exclusive J/psi and other vector mesons, used for the SoLID J/psi
+# studies). eic_xl ships it, but that build ends in a segmentation fault before main() with ROOT 6.38 or newer
+# (containers/patches/lager-3.7.0-root-6.40.patch has the reason). Build the same release with that patch and
+# the one of the eic-spack recipe into /opt/lager: with its examples, and with an RPATH (not RUNPATH) so that
+# it loads its own libraries although LD_LIBRARY_PATH holds /opt/local/lib with the ones that crash.
+# profile.d/z20_solid.sh puts /opt/lager/bin first on PATH.
+ARG LAGER_VERSION=3.7.0
+ARG LAGER_SHA256=3ba025b744caae17e7109d8f8a19edd3e2ffdd79d07ff692373f15e92310f2f5
+COPY containers/patches/lager-3.7.0-root-6.40.patch /tmp/lager/lager.patch
+RUN cd /tmp/lager && \
+    spack_pkg=/opt/spack-packages/repos/eic-spack/spack_repo/eic/packages/lager && \
+    curl -fsSL -o lager.tar.gz \
+         https://eicweb.phy.anl.gov/monte_carlo/lager/-/archive/${LAGER_VERSION}/lager-${LAGER_VERSION}.tar.gz && \
+    echo "${LAGER_SHA256}  lager.tar.gz" | sha256sum -c - && \
+    mkdir src && tar -xzf lager.tar.gz -C src --strip-components=1 --no-same-owner && \
+    patch -d src -p1 < "${spack_pkg}/fix-photospp-includes.patch" && \
+    patch -d src -p1 < lager.patch && \
+    cmake -S src -B build -DCMAKE_INSTALL_PREFIX=/opt/lager -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_MODULE_PATH="${spack_pkg}" -DHEPMC_DIR=/opt/local -DPHOTOSPP_DIR=/opt/local \
+          -DCMAKE_INSTALL_RPATH=/opt/lager/lib \
+          -DCMAKE_EXE_LINKER_FLAGS=-Wl,--disable-new-dtags -DCMAKE_SHARED_LINKER_FLAGS=-Wl,--disable-new-dtags && \
+    cmake --build build -j"$(nproc)" && cmake --install build && \
+    mkdir -p /opt/lager/share/lager && cp -r src/examples src/COPYING src/README.md lager.patch /opt/lager/share/lager/ && \
+    cd / && rm -rf /tmp/lager && \
+    /opt/lager/bin/lager --help > /dev/null && echo "lager: starts"
 
 # SoLID geometry, built with the image's own toolchain
 COPY . /opt/src/solid_dd4hep

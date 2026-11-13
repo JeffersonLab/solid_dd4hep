@@ -4,7 +4,7 @@
 
 usage (inside eic-shell / solid-shell, after `source thissolid.sh <config>`):
     make_solid_views [-c CONFIG] [-o OUTDIR] [--source scene|dawnfile] [--scene FILE | --prim FILE] [-n EVENTS]
-                     [--views v1,v2,...] [--formats svg,pdf,png] [--name FORMAT] [--field MAP] [--animate]
+                     [--views v1,v2,...] [--formats svg,pdf,png] [--name FORMAT] [--field FILE] [--animate]
 
 Geometry source (--source):
     scene        (default) solid_scene_dump writes scene.npz: the Geant4 polyhedra of all visible volumes with
@@ -25,12 +25,15 @@ Views (all in the GEMC hall frame, beam from left to right):
                  and the configuration's display name as title (compact file as subtitle); PNG about 1600 px wide.
                  The README figures:
                      make_solid_views --views overview --formats svg,png --name '{view}_{config}' -o docs/images
-    field_yz     the x = 0 section with the solenoid field under it: |B| in colour bands, field lines, direction
-                 arrows, iron in grey, a callout label per subsystem (solid_lineview --field). The map is the
-                 2-D solenoid map of the configuration's field fragment (compact/fields/field_*.xml, found in
-                 $DETECTOR_PATH/fieldmaps after the first run); --field MAP names another one. Other fields of
-                 the configuration (the NH3 target magnet) are not drawn.
+    field_yz     the x = 0 section with the magnetic field under it: |B| in colour bands, field lines, direction
+                 arrows, iron in grey, a callout label per subsystem (solid_lineview --field). The field is the
+                 total field of the configuration (solenoid map, target magnet, ...): solid_field_dump samples it
+                 through DD4hep on the section plane, so the drawing shows what the simulation uses.
+                 --field FILE draws a given file instead: a GEMC 2-D map, or a field.npz of solid_field_dump.
                      make_solid_views --views field_yz --formats svg,png --name '{view}_{config}' -o docs/images
+    field_xz     the same in the y = 0 section, seen from above (x up). The polarized NH3 target magnet has its
+                 field along x: it lies in this plane, and points out of the plane of field_yz.
+    field_target the y = 0 section around the target (1 m on each side of it), with its field
 Events (-n EVENTS > 0): ddsim runs the default particle gun of steering/solid_sim.py with the geometry scene
 (SOLID_SCENE) and the trajectory recorder (SOLID_TRAJ), solid_evexport writes one event file per event, and
 solid_evview draws them: tracks coloured by particle type, hit markers, volumes coloured by deposited energy,
@@ -40,8 +43,8 @@ with a legend and a colour bar. Several events are overlaid in one figure. Views
     event_beam   beam-eye section just behind the front face of that volume
     event_cutaway  3-D hidden-line drawing cut at that plane
     section_yz, section_xz, cutaway, beam_<z>   the standard views with the events on top
-These are the default views with -n: event_side, event_beam, event_cutaway. lines_yz, overview and field_yz are
-drawn without events. --animate adds an animation of event_side (GIF and animated SVG, see solid_evview --help).
+These are the default views with -n: event_side, event_beam, event_cutaway. lines_yz, overview and the field
+views are drawn without events. --animate adds an animation of event_side (GIF and animated SVG, see solid_evview --help).
 --keep keeps the simulation output and the event files. docs/event_display.md describes the tools.
 
 With --source dawnfile G4DAWNFILE_VIEWER is set to 'true' so that the legacy DAWN program is not started. For
@@ -70,8 +73,16 @@ VIEWS = {
                    '--trim-margin', '0.015', '--beam-arrow', '--labels', 'solid', '--title-bold',
                    '--title-size', '13', '--no-traj', '--no-hits'],
 }
-FIELD_VIEW = ['--mode', 'section', '--section', 'x=0', '--view', 'side', '--scale-bar', '--labels', 'solid',
-              '--size', '2000x1000', '--dpi', '150', '--lw', '0.5', '--title-bold', '--title-size', '13']
+# field views: (plane of solid_field_dump, solid_lineview options, the plane in words)
+FIELD_BASE = ['--mode', 'section', '--scale-bar', '--labels', 'solid', '--size', '2000x1000', '--dpi', '150',
+              '--lw', '0.5', '--title-bold', '--title-size', '13']
+FIELD_VIEWS = {
+    'field_yz': ('x=0', ['--section', 'x=0', '--view', 'side'], 'x = 0 section'),
+    'field_xz': ('y=0', ['--section', 'y=0', '--view', 'top'], 'y = 0 section seen from above'),
+    'field_target': ('y=0', ['--section', 'y=0', '--view', 'top', '--fit-volumes', r'(^|!)Target_', '--fit-pad', '1m',
+                             '--field-arrows', '25cm', '--size', '1500x1500'],
+                     'y = 0 section around the target, seen from above'),
+}
 
 DEFAULT_VIEWS = 'section_yz,section_xz,cutaway,lines_yz'
 DEFAULT_EVENT_VIEWS = 'event_side,event_beam,event_cutaway'
@@ -151,17 +162,35 @@ def make_events(compact, workdir, events, segments, steering):
     return scene, evdir
 
 
-def find_scene_dump():
-    """solid_scene_dump: installed next to this script, on PATH, or in the build tree of a source checkout"""
-    for cand in (os.path.join(HERE, 'solid_scene_dump'), shutil.which('solid_scene_dump') or '',
-                 os.path.join(os.path.dirname(HERE), 'build', 'bin', 'solid_scene_dump')):
+def find_binary(name):
+    """a compiled tool: installed next to this script, on PATH, or in the build tree of a source checkout"""
+    for cand in (os.path.join(HERE, name), shutil.which(name) or '',
+                 os.path.join(os.path.dirname(HERE), 'build', 'bin', name)):
         if cand and os.path.isfile(cand) and os.access(cand, os.X_OK):
             return cand
     return None
 
 
+def make_field(compact, workdir, plane):
+    """solid_field_dump: the total field of the configuration on a plane -> field.npz"""
+    tool = find_binary('solid_field_dump')
+    if not tool:
+        print('make_solid_views: solid_field_dump not found (build and install solid_dd4hep, or give --field FILE)',
+              file=sys.stderr)
+        return None
+    out = os.path.join(workdir, 'field_%s.npz' % plane.replace('=', ''))
+    cmd = [tool, compact, '--plane', plane, '-o', out]
+    print('+', ' '.join(cmd), flush=True)
+    with open(os.path.join(workdir, 'solid_field_dump.log'), 'a') as log:
+        r = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=workdir, timeout=3600, check=False)
+    if r.returncode != 0 or not os.path.isfile(out):
+        print(f'make_solid_views: no field file produced, see {workdir}/solid_field_dump.log', file=sys.stderr)
+        return None
+    return out
+
+
 def make_scene(compact, workdir, segments):
-    tool = find_scene_dump()
+    tool = find_binary('solid_scene_dump')
     if not tool:
         sys.exit('make_solid_views: solid_scene_dump not found (build and install solid_dd4hep, or use '
                  '--source dawnfile)')
@@ -196,34 +225,6 @@ def make_prim(compact, workdir, events, segments, steering):
     return os.path.join(workdir, prims[-1])
 
 
-def find_field_map(compact, path):
-    """(map file, scale) of the first 2-D solenoid map (SoLID_FieldMapB, BrBz) the compact file includes"""
-    try:
-        text = open(compact).read()
-    except OSError:
-        return None, 1.0
-    text = re.sub(r'<!--.*?-->', '', text, flags=re.S)
-    for ref in re.findall(r'<include\s+ref="([^"]*field[^"]*\.xml)"', text):
-        frag = ref.replace('${DETECTOR_PATH}', path)
-        try:
-            ftext = re.sub(r'<!--.*?-->', '', open(frag).read(), flags=re.S)
-        except OSError:
-            continue
-        for m in re.finditer(r'<field\b[^>]*>', ftext, flags=re.S):
-            tag = m.group(0)
-            fm = re.search(r'field_map="([^"]*)"', tag)
-            if 'coord_type="BrBz"' not in tag or not fm:
-                continue
-            sc = re.search(r'\bscale="([^"]*)"', tag)
-            for base in ('.', path):
-                f = os.path.join(base, fm.group(1))
-                if os.path.isfile(f):
-                    return f, float(sc.group(1)) if sc else 1.0
-            print(f'field map {fm.group(1)} not found in . or {path} (load the geometry once to download it)',
-                  file=sys.stderr)
-    return None, 1.0
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('-c', '--config', default=os.environ.get('DETECTOR_CONFIG', 'solid'))
@@ -241,8 +242,9 @@ def main():
     ap.add_argument('--segments', type=int, default=72, help='line segments per full circle (default 72)')
     ap.add_argument('--name', default='{config}_{view}',
                     help="output file name without extension, with {config} and {view} (default '{config}_{view}')")
-    ap.add_argument('--field', default=None, help='2-D field map for the field_yz view (default: the map of the '
-                    "configuration's field fragment)")
+    ap.add_argument('--field', default=None, metavar='FILE',
+                    help='field file for the field views: a GEMC 2-D map or a field.npz of solid_field_dump '
+                         '(default: the total field of the configuration, sampled with solid_field_dump)')
     ap.add_argument('--keep', action='store_true', help='keep the work directory with the scene.npz or .prim file')
     ap.add_argument('lineview_args', nargs='*', help='extra arguments passed to solid_lineview (after --)')
     a = ap.parse_args()
@@ -265,6 +267,8 @@ def main():
         else:
             prim = make_prim(compact, workdir, a.events, a.segments, steering)
     print('scene file:', prim, flush=True)
+    fields = {}                                     # plane -> field.npz of this run
+    tmpdir = None                                   # for field files when the scene was given
     if a.views is None:
         a.views = DEFAULT_EVENT_VIEWS if evdir else DEFAULT_VIEWS
 
@@ -293,13 +297,20 @@ def main():
         if view.startswith('beam_'):
             z_cm = float(view.split('_', 1)[1])
             opts = ['--mode', 'section', '--section', f'z={z_cm}cm', '--view', 'beam', '--fill', '--scale-bar']
-        elif view == 'field_yz':
-            fmap, fscale = (a.field, 1.0) if a.field else find_field_map(compact, path)
+        elif view in FIELD_VIEWS:
+            plane, fopts, where = FIELD_VIEWS[view]
+            fmap = a.field
             if not fmap:
-                print('field_yz: no 2-D field map found (use --field MAP), skipped', file=sys.stderr)
+                if plane not in fields:
+                    if workdir is None and tmpdir is None:
+                        tmpdir = tempfile.mkdtemp(prefix=f'views_{a.config}_', dir=os.path.abspath(a.outdir))
+                    fields[plane] = make_field(compact, workdir or tmpdir, plane)
+                fmap = fields[plane]
+            if not fmap:
+                print(f'{view}: no field file, skipped', file=sys.stderr)
                 status |= 1
                 continue
-            opts = FIELD_VIEW + ['--field', fmap, '--field-scale', str(fscale)]
+            opts = FIELD_BASE + fopts + ['--field', fmap]
         elif view in VIEWS:
             opts = list(VIEWS[view])
         else:
@@ -310,17 +321,19 @@ def main():
             outs += ['-o', os.path.join(a.outdir, a.name.format(config=a.config, view=view) + '.' + fmt.strip())]
         if view == 'overview':
             titles = ['--title', DISPLAY_NAMES.get(a.config, a.config), '--subtitle', SUBTITLE.format(config=a.config)]
-        elif view == 'field_yz':
-            titles = ['--title', DISPLAY_NAMES.get(a.config, a.config) + ': solenoid field',
-                      '--subtitle', '%s.xml, map %s' % (a.config, os.path.basename(fmap))]
+        elif view in FIELD_VIEWS:
+            what = 'field of %s' % os.path.basename(a.field) if a.field else 'total field of the configuration'
+            titles = ['--title', DISPLAY_NAMES.get(a.config, a.config) + ': magnetic field',
+                      '--subtitle', '%s.xml · %s, %s' % (a.config, what, where)]
         else:
             titles = ['--title', f'{a.config}: {view}']
         cmd = [sys.executable, lineview, prim] + opts + outs + titles + a.lineview_args
         print('+', ' '.join(cmd), flush=True)
         r = subprocess.run(cmd)
         status |= r.returncode
-    if workdir and not a.keep:
-        shutil.rmtree(workdir, ignore_errors=True)
+    for d in (workdir, tmpdir):
+        if d and not a.keep:
+            shutil.rmtree(d, ignore_errors=True)
     return status
 
 

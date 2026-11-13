@@ -44,7 +44,7 @@ from collections import Counter, defaultdict
 
 import numpy as np
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 TWO_PI = 2.0 * math.pi
 VERBOSE = 1
@@ -942,7 +942,7 @@ def snap_vertices(sc, V, tri, planes, snap, section):
                                  touches the plane from the removed side goes away completely
       section plane              the side that makes a solid touching the plane with a whole face be cut
                                  along that face, and leaves a solid touching with an edge or corner uncut
-    The shift (1 nm by default) is far below anything visible.  Returns V itself if nothing is near."""
+    The shift (1 um by default) is far below anything visible.  Returns V itself if nothing is near."""
     if snap <= 0 or not len(V) or not sc.solids:
         return V
     vsolid = None
@@ -1368,7 +1368,147 @@ def chain_2d(X0, Y0, X1, Y1, tol=1e-3):
     return out
 
 
+def clip_segments_rect(x0, y0, x1, y1, rect):
+    """Parts of 2-D segments inside rect = (xa, ya, xb, yb) (Liang-Barsky).
+    Returns (x0, y0, x1, y1, src), src = index of the input segment of each piece."""
+    xa, ya, xb, yb = rect
+    dx, dy = x1 - x0, y1 - y0
+    t0, t1 = np.zeros(len(x0)), np.ones(len(x0))
+    out = np.zeros(len(x0), bool)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        for p_, q_ in ((-dx, x0 - xa), (dx, xb - x0), (-dy, y0 - ya), (dy, yb - y0)):
+            out |= (p_ == 0) & (q_ < 0)
+            r = q_ / p_
+            t0 = np.where(p_ < 0, np.maximum(t0, r), t0)
+            t1 = np.where(p_ > 0, np.minimum(t1, r), t1)
+    src = np.nonzero(~out & (t0 < t1))[0]
+    a, b = t0[src], t1[src]
+    return (x0[src] + a * dx[src], y0[src] + a * dy[src], x0[src] + b * dx[src], y0[src] + b * dy[src], src)
+
+
+def clip_polyline_rect(xy, rect):
+    """Open polyline (n, 2) clipped to rect = (xa, ya, xb, yb): the list of its pieces inside."""
+    if len(xy) < 2:
+        return []
+    xa, ya, xb, yb = rect
+    if xy[:, 0].min() >= xa and xy[:, 0].max() <= xb and xy[:, 1].min() >= ya and xy[:, 1].max() <= yb:
+        return [xy]
+    x0, y0, x1, y1, src = clip_segments_rect(xy[:-1, 0], xy[:-1, 1], xy[1:, 0], xy[1:, 1], rect)
+    if len(src) == 0:
+        return []
+    # a piece continues the previous one if it is the next segment and starts where that one ended
+    brk = np.nonzero((np.diff(src) != 1) | (np.abs(x0[1:] - x1[:-1]) > 1e-9) | (np.abs(y0[1:] - y1[:-1]) > 1e-9))[0] + 1
+    return [np.stack([np.append(x0[g], x1[g[-1]]), np.append(y0[g], y1[g[-1]])], 1)
+            for g in np.split(np.arange(len(src)), brk)]
+
+
+def clip_polygon_rect(P, rect):
+    """Closed 2-D polygon (n, 2) clipped to rect = (xa, ya, xb, yb) (Sutherland-Hodgman); may be empty."""
+    xa, ya, xb, yb = rect
+    if len(P) == 0 or (P[:, 0].min() >= xa and P[:, 0].max() <= xb and P[:, 1].min() >= ya and P[:, 1].max() <= yb):
+        return P
+    if P[:, 0].max() < xa or P[:, 0].min() > xb or P[:, 1].max() < ya or P[:, 1].min() > yb:
+        return P[:0]
+    for ax, sign, lim in ((0, 1.0, xa), (0, -1.0, xb), (1, 1.0, ya), (1, -1.0, yb)):
+        if len(P) == 0:
+            break
+        d = sign * (P[:, ax] - lim)
+        res = []
+        m = len(P)
+        for i in range(m):
+            j = (i + 1) % m
+            if d[i] >= 0:
+                res.append(P[i])
+            if (d[i] >= 0) != (d[j] >= 0):
+                res.append(P[i] + (d[i] / (d[i] - d[j])) * (P[j] - P[i]))
+        P = np.array(res).reshape(-1, 2)
+    return P
+
+
+def merge_collinear(x0, y0, x1, y1, prio, style, tol=0.02):
+    """Remove overdraw: where segments lie on the same straight line and overlap, keep one.
+
+    Edges of touching volumes, a cut outline and the mesh edge under it, or edges that only coincide in
+    the projection are otherwise drawn on top of each other: anti-aliased lines come out darker there,
+    and whether the second copy is drawn can depend on rounding.  Segments are grouped by supporting
+    line (foot point of the perpendicular from the origin and direction, both within `tol` px over the
+    size of the drawing).  On each line the covered intervals are united; where several segments
+    overlap, the one with the highest `prio` wins (then the first), and neighbouring pieces with the
+    same `style` are joined.  End points keep the coordinates of the input points they come from, so
+    polylines still chain at corners.
+
+    Returns (x0, y0, x1, y1, src), src = index of the input segment each piece takes its style from."""
+    n = len(x0)
+    src = np.arange(n)
+    if n < 2:
+        return x0, y0, x1, y1, src
+    dx, dy = x1 - x0, y1 - y0
+    L = np.hypot(dx, dy)
+    ok = L > 1e-9
+    if not ok.all():
+        x0, y0, x1, y1, dx, dy, L, src = x0[ok], y0[ok], x1[ok], y1[ok], dx[ok], dy[ok], L[ok], src[ok]
+        n = len(x0)
+        if n < 2:
+            return x0, y0, x1, y1, src
+    dx, dy = dx / L, dy / L
+    flip = np.where(np.abs(dx) >= np.abs(dy), dx < 0, dy < 0)        # one orientation per line
+    dx, dy = np.where(flip, -dx, dx), np.where(flip, -dy, dy)
+    rho = y0 * dx - x0 * dy                                           # offset along the normal (-dy, dx)
+    R = max(float(np.abs([x0, y0, x1, y1]).max()), 1.0)
+    K = np.stack([-rho * dy, rho * dx, R * (dx * dx - dy * dy), R * 2.0 * dx * dy], 1)
+    lab = np.zeros(n, np.int64)
+    for c in range(4):                                                # single linkage, one coordinate at a time
+        order = np.lexsort((K[:, c], lab))
+        ls, ks = lab[order], K[order, c]
+        new = np.ones(n, bool)
+        new[1:] = (ls[1:] != ls[:-1]) | (ks[1:] - ks[:-1] > tol)
+        lab[order] = np.cumsum(new) - 1
+    order = np.argsort(lab, kind="stable")
+    ls = lab[order]
+    starts = np.nonzero(np.r_[True, ls[1:] != ls[:-1]])[0]
+    sizes = np.diff(np.r_[starts, n])
+    single = sizes == 1
+    keep = order[starts[single]]
+    ox0, oy0, ox1, oy1, osrc = [x0[keep]], [y0[keep]], [x1[keep]], [y1[keep]], [src[keep]]
+    px0, py0, px1, py1, psrc = [], [], [], [], []
+    for st, m in zip(starts[~single], sizes[~single]):
+        idx = np.sort(order[st:st + m])                               # input order: the first wins a tie
+        rx, ry, ex, ey = x0[idx[0]], y0[idx[0]], dx[idx[0]], dy[idx[0]]
+        ta = (x0[idx] - rx) * ex + (y0[idx] - ry) * ey
+        tb = (x1[idx] - rx) * ex + (y1[idx] - ry) * ey
+        lo, hi = np.minimum(ta, tb), np.maximum(ta, tb)
+        tt = np.concatenate([ta, tb])
+        qx = np.concatenate([x0[idx], x1[idx]])
+        qy = np.concatenate([y0[idx], y1[idx]])
+        o2 = np.argsort(tt, kind="stable")
+        tt, qx, qy = tt[o2], qx[o2], qy[o2]
+        first = np.r_[True, np.diff(tt) > 1e-6]                       # break points, each with its input point
+        bt, bx, by = tt[first], qx[first], qy[first]
+        if len(bt) < 2:
+            continue
+        mid = 0.5 * (bt[:-1] + bt[1:])
+        cover = (lo[:, None] < mid[None, :]) & (hi[:, None] > mid[None, :])
+        score = np.where(cover, prio[src[idx]][:, None], -np.inf)
+        win = np.argmax(score, 0)                                     # first of the best
+        has = cover.any(0)
+        sty = np.where(has, style[src[idx]][win], -1)
+        # runs of covered elementary intervals with one style
+        brk = np.r_[True, (sty[1:] != sty[:-1]), True]
+        for a, b in zip(np.nonzero(brk[:-1])[0], np.nonzero(brk[1:])[0]):
+            if sty[a] < 0:
+                continue
+            px0.append(bx[a]); py0.append(by[a]); px1.append(bx[b + 1]); py1.append(by[b + 1])
+            psrc.append(src[idx[win[a]]])
+    if px0:
+        ox0.append(np.array(px0)); oy0.append(np.array(py0)); ox1.append(np.array(px1)); oy1.append(np.array(py1))
+        osrc.append(np.array(psrc, np.int64))
+    return (np.concatenate(ox0), np.concatenate(oy0), np.concatenate(ox1), np.concatenate(oy1),
+            np.concatenate(osrc))
+
+
 class Renderer:
+    window = None                       # (x0, y0, x1, y1) px when the view is fitted to a chosen window
+
     def __init__(self, sc, opts):
         self.sc = sc
         self.o = opts
@@ -1552,8 +1692,24 @@ class Renderer:
         x = np.concatenate(xs)
         y = np.concatenate(ys)
         x0, x1, y0, y1 = x.min(), x.max(), y.min(), y.max()
+        if o.fit_volumes:
+            # the box around the named volumes instead of the whole content
+            rx = re.compile(o.fit_volumes)
+            boxes = [(v.bmin, v.bmax) for v in self.sc.solids
+                     if v.bmin is not None and rx.search(v.path if o.match_path else v.name)]
+            if boxes:
+                lo, hi = np.min([b[0] for b in boxes], 0), np.max([b[1] for b in boxes], 0)
+                corners = np.array([[(lo, hi)[i][0], (lo, hi)[j][1], (lo, hi)[k][2]]
+                                    for i in (0, 1) for j in (0, 1) for k in (0, 1)])
+                bx, by, _ = cam.view(corners)
+                x0, x1, y0, y1 = bx.min(), bx.max(), by.min(), by.max()
+            else:
+                log("warning: --fit-volumes: no volume matches '%s'; fitting everything" % o.fit_volumes, 0)
+        if o.fit_pad:
+            x0, x1, y0, y1 = x0 - o.fit_pad, x1 + o.fit_pad, y0 - o.fit_pad, y1 + o.fit_pad
         if o.fit_box:
             x0, x1, y0, y1 = o.fit_box
+        windowed = bool(o.fit_volumes or o.fit_box)
         m = o.margin * min(W, H)
         dx, dy = max(x1 - x0, 1e-9), max(y1 - y0, 1e-9)
         s = min((W - 2 * m) / dx, (H - 2 * m) / dy)
@@ -1568,6 +1724,8 @@ class Renderer:
                 band = int(math.ceil(band))
                 H += band
                 cy += 0.5 * band / s   # move the drawing down by the band
+        # a chosen window: lines and fills are clipped to it (sections and line modes), below the title band
+        self.window = (0.0, float(title_band_px(o)) if not o.no_crop else 0.0, float(W), float(H)) if windowed else None
         return s, 0.5 * (x0 + x1), cy, W, H
 
     # ------------------------------------------------------------------ beam arrow
@@ -1690,6 +1848,9 @@ class Renderer:
         sy0 = Y0[seg_e] + t0 * (Y1[seg_e] - Y0[seg_e])
         sx1 = X0[seg_e] + t1 * (X1[seg_e] - X0[seg_e])
         sy1 = Y0[seg_e] + t1 * (Y1[seg_e] - Y0[seg_e])
+        if self.window is not None and len(seg_e):
+            sx0, sy0, sx1, sy1, src = clip_segments_rect(sx0, sy0, sx1, sy1, self.window)
+            seg_e = seg_e[src]
         self.n_vis_segments = len(seg_e)
         self.vis_segs = (sx0, sy0, sx1, sy1, es[seg_e])      # what is drawn: label anchors
         with timed("style + chain %d visible segments" % len(seg_e)):
@@ -1894,6 +2055,11 @@ class Renderer:
             return
         uk, inv = np.unique(key, axis=0, return_inverse=True)
         inv = inv.ravel()
+        if not o.keep_overdraw:
+            with timed("merge overlapping lines"):
+                x0, y0, x1, y1, src = merge_collinear(x0, y0, x1, y1, lwq, inv)
+            self.n_drawn_segments = len(src)
+            inv = inv[src]
         for g in range(len(uk)):
             m = inv == g
             pls = chain_2d(x0[m], y0[m], x1[m], y1[m])
@@ -2043,19 +2209,29 @@ class Renderer:
 # =============================================================================
 #  7b.  Magnetic field under a section (--field)
 # =============================================================================
-#  The field comes from a GEMC 2-D map (rows R Z Br Bz behind an <mfield> header, axisymmetric about
-#  the z axis of the hall frame), the format of the SoLID solenoid maps.  Under the outlines of a
-#  section it is drawn as
+#  Two sources:
+#    * a GEMC 2-D map (rows R Z Br Bz behind an <mfield> header, axisymmetric about the z axis of the
+#      hall frame), the format of the SoLID solenoid maps;
+#    * field.npz written by solid_field_dump: the total field of a configuration (all its DD4hep field
+#      overlays, e.g. solenoid plus target magnet) sampled on the section plane.
+#  Under the outlines of a section the field is drawn as
 #    * |B| in colour bands (one hue, light to dark, edges 1-3-10-...), for any section plane;
-#    * field lines, for planes through the z axis: contours of the flux function
-#      psi(r, z) = integral_0^r Bz r' dr' in equal steps, so the same flux runs between neighbours.
-#      A 1 cm map cannot be integrated through iron (B jumps at the faces), so psi is carried from
-#      the axis through the air only; the iron is where the solids matching --field-iron are cut;
-#    * unit arrows of the in-plane field direction on a coarse grid, in air where |B| >= 1 G.
-#  The iron itself is filled grey: the map is not meaningful inside it.
+#    * field lines.  Where the in-plane field is axisymmetric about the z axis (a 2-D map, or a sampled
+#      field in a plane through the axis whose two halves mirror each other) they are contours of the
+#      flux function psi(r, z) = integral_0^r Bz r' dr' in equal steps, so the same flux runs between
+#      neighbours.  A 1 cm grid cannot be integrated through iron (B jumps at the faces), so psi is
+#      carried from the axis through the air only; the iron is where the solids matching --field-iron
+#      are cut.  Otherwise the lines follow the in-plane field direction at an even spacing: they show
+#      the direction only, the bands show the strength;
+#    * unit arrows of the in-plane field direction on a coarse grid, in air where |B| >= 1 G; where the
+#      field points mostly out of the plane, a dot in a circle (towards the viewer) or a cross in a
+#      circle (away from the viewer) instead.
+#  The iron itself is filled grey: the field is not meaningful inside it.
 
-FIELD_BANDS_G = [1, 3, 10, 30, 100, 300, 1000, 3000, 10000, 30000]
-FIELD_RAMP = ["#eef5fe", "#dcebfc", "#c3dcfa", "#a5caf6", "#86b6f1", "#689fea", "#4b88e0", "#3272d0", "#1f5cb5"]
+FIELD_BANDS_G = [1, 3, 10, 30, 100, 300, 1000, 3000, 10000, 30000, 100000]
+FIELD_RAMP = ["#eef5fe", "#dcebfc", "#c3dcfa", "#a5caf6", "#86b6f1", "#689fea", "#4b88e0", "#3272d0", "#1f5cb5",
+              "#143f85"]
+FIELD_MIN_BANDS = 9                 # the key always reaches 3 T; the 3-10 T band appears when it is used
 FIELD_LINE_RGB = (0.05, 0.16, 0.33)
 FIELD_ARROW_RGB = (0.32, 0.32, 0.31)
 FIELD_IRON_RGB = (0.80, 0.80, 0.78)
@@ -2069,47 +2245,12 @@ def field_text(g):
     return ("%g T" % (g / 1e4)) if g >= 1000 else "%g G" % g
 
 
-class FieldMap:
-    """GEMC 2-D map: r, z (cm), Br, Bz (gauss) shaped (nR, nZ)."""
+class AxialField:
+    """In-plane field that is axisymmetric about the z axis, on a regular grid: r, z (cm), Br, Bz (gauss)
+    shaped (nR, nZ)."""
 
-    def __init__(self, path, scale=1.0):
-        head, nhead = [], 0
-        with open(path) as fh:
-            for line in fh:
-                if not head and not line.strip():
-                    nhead += 1
-                    continue
-                if not head and "<mfield>" not in line:
-                    break
-                head.append(line)
-                nhead += 1
-                if "</mfield>" in line:
-                    break
-        text = "".join(head)
-        if "<mfield>" not in text:
-            raise SystemExit("%s: no <mfield> header (not a GEMC field map)" % path)
-        if not re.search(r'<symmetry\s+type="cylindrical-z"', text):
-            raise SystemExit("%s: only cylindrical-z (2-D) maps can be drawn" % path)
-
-        def axis(which):
-            m = re.search(r"<%s\b([^>]*)>" % which, text)
-            at = dict(re.findall(r'(\w+)="([^"]*)"', m.group(1)))
-            k = {"mm": 0.1, "cm": 1.0, "m": 100.0}[at.get("units", "cm")]
-            return int(at["npoints"]), float(at["min"]) * k, float(at["max"]) * k
-
-        nr, r0, r1 = axis("first")
-        nz, z0, z1 = axis("second")
-        m = re.search(r'<field\s+unit="([^"]*)"', text)
-        fac = {"gauss": 1.0, "g": 1.0, "kilogauss": 1e3, "kg": 1e3, "tesla": 1e4, "t": 1e4}[
-            m.group(1).lower() if m else "gauss"]
-        m = re.search(r'<description\s+name="([^"]*)"', text)
-        self.name = m.group(1) if m else os.path.basename(path)
-        data = np.loadtxt(path, skiprows=nhead, usecols=(2, 3))
-        if len(data) != nr * nz:
-            raise SystemExit("%s: %d rows, the header says %d x %d" % (path, len(data), nr, nz))
-        self.r, self.z = np.linspace(r0, r1, nr), np.linspace(z0, z1, nz)
-        self.Br = data[:, 0].reshape(nr, nz) * fac * scale
-        self.Bz = data[:, 1].reshape(nr, nz) * fac * scale
+    def __init__(self, r, z, Br, Bz):
+        self.r, self.z, self.Br, self.Bz = r, z, Br, Bz
 
     def at(self, r_cm, z_cm):
         """(Br, Bz, inside) by bilinear interpolation"""
@@ -2180,6 +2321,255 @@ class FieldMap:
         return psi
 
 
+class FieldMap(AxialField):
+    """GEMC 2-D map: r, z (cm), Br, Bz (gauss) shaped (nR, nZ)."""
+
+    def __init__(self, path, scale=1.0):
+        head, nhead = [], 0
+        with open(path) as fh:
+            for line in fh:
+                if not head and not line.strip():
+                    nhead += 1
+                    continue
+                if not head and "<mfield>" not in line:
+                    break
+                head.append(line)
+                nhead += 1
+                if "</mfield>" in line:
+                    break
+        text = "".join(head)
+        if "<mfield>" not in text:
+            raise SystemExit("%s: no <mfield> header (not a GEMC field map)" % path)
+        if not re.search(r'<symmetry\s+type="cylindrical-z"', text):
+            raise SystemExit("%s: only cylindrical-z (2-D) maps can be drawn" % path)
+
+        def axis(which):
+            m = re.search(r"<%s\b([^>]*)>" % which, text)
+            at = dict(re.findall(r'(\w+)="([^"]*)"', m.group(1)))
+            k = {"mm": 0.1, "cm": 1.0, "m": 100.0}[at.get("units", "cm")]
+            return int(at["npoints"]), float(at["min"]) * k, float(at["max"]) * k
+
+        nr, r0, r1 = axis("first")
+        nz, z0, z1 = axis("second")
+        m = re.search(r'<field\s+unit="([^"]*)"', text)
+        fac = {"gauss": 1.0, "g": 1.0, "kilogauss": 1e3, "kg": 1e3, "tesla": 1e4, "t": 1e4}[
+            m.group(1).lower() if m else "gauss"]
+        m = re.search(r'<description\s+name="([^"]*)"', text)
+        self.name = m.group(1) if m else os.path.basename(path)
+        data = np.loadtxt(path, skiprows=nhead, usecols=(2, 3))
+        if len(data) != nr * nz:
+            raise SystemExit("%s: %d rows, the header says %d x %d" % (path, len(data), nr, nz))
+        AxialField.__init__(self, np.linspace(r0, r1, nr), np.linspace(z0, z1, nz),
+                            data[:, 0].reshape(nr, nz) * fac * scale, data[:, 1].reshape(nr, nz) * fac * scale)
+
+    def check_plane(self, n, d):
+        pass                                        # axisymmetric: defined on every plane
+
+    def vector(self, P):
+        """world points (N, 3) mm -> field (N, 3) gauss in the hall frame, inside the map (N,)"""
+        rr = np.hypot(P[:, 0], P[:, 1])
+        br, bz, inside = self.at(rr / 10.0, P[:, 2] / 10.0)
+        k = np.where(rr > 1e-9, br / np.maximum(rr, 1e-9), 0.0)
+        return np.stack([k * P[:, 0], k * P[:, 1], bz], 1), inside
+
+    def axial(self, n, d):
+        """the (r, z) field for flux lines, if the plane holds the z axis"""
+        return self if abs(n[2]) < 1e-6 and abs(d) < 1e-6 else None
+
+
+class SampledField:
+    """field.npz of solid_field_dump: the field (hall-frame components) on a regular grid in one plane."""
+
+    def __init__(self, path, scale=1.0):
+        with np.load(path, allow_pickle=False) as f:
+            need = ("u", "v", "B", "origin", "u_dir", "v_dir", "normal")
+            if any(k not in f for k in need):
+                raise SystemExit("%s: not a field file of solid_field_dump (arrays %s)" % (path, ", ".join(need)))
+            self.u, self.v = np.asarray(f["u"], float), np.asarray(f["v"], float)             # mm
+            self.B = np.asarray(f["B"], float) * 1e4 * scale                                   # tesla -> gauss
+            self.origin, self.u_dir, self.v_dir, self.normal = (np.asarray(f[k], float) for k in need[3:])
+        if self.B.shape != (len(self.u), len(self.v), 3) or len(self.u) < 2 or len(self.v) < 2:
+            raise SystemExit("%s: B must have the shape (len(u), len(v), 3)" % path)
+        self.name = os.path.basename(path)
+
+    def check_plane(self, n, d):
+        if abs(abs(float(n @ self.normal)) - 1.0) > 1e-9 or abs(float(n @ self.origin) + d) > 1e-3:
+            raise SystemExit("--field %s: the field was sampled on the plane through (%g, %g, %g) mm with normal "
+                             "(%g, %g, %g), not on this section plane; run solid_field_dump for this plane"
+                             % ((self.name,) + tuple(self.origin) + tuple(self.normal)))
+
+    def vector(self, P):
+        """world points (N, 3) mm on the plane -> field (N, 3) gauss, inside the sampled range (N,)"""
+        u, v = self.u, self.v
+        q = P - self.origin[None, :]
+        pu, pv = q @ self.u_dir, q @ self.v_dir
+        inside = (pu >= u[0]) & (pu <= u[-1]) & (pv >= v[0]) & (pv <= v[-1])
+        fi = np.clip((pu - u[0]) / (u[1] - u[0]), 0, len(u) - 1.000001)
+        fj = np.clip((pv - v[0]) / (v[1] - v[0]), 0, len(v) - 1.000001)
+        i, j = fi.astype(np.int64), fj.astype(np.int64)
+        a, b = (fi - i)[:, None], (fj - j)[:, None]
+        B = self.B
+        return (B[i, j] * (1 - a) * (1 - b) + B[i + 1, j] * a * (1 - b) + B[i, j + 1] * (1 - a) * b
+                + B[i + 1, j + 1] * a * b), inside
+
+    def axial(self, n, d):
+        """The in-plane field as an AxialField, if the plane holds the z axis and the two halves of the
+        in-plane field mirror each other (Br odd, Bz even in the distance from the axis); else None.
+        A component normal to the plane (a transverse target magnet seen in its mid plane) does not
+        matter: the flux lines are those of the in-plane field."""
+        ez = np.array([0.0, 0.0, 1.0])
+        if abs(self.normal[2]) > 1e-9 or abs(float(self.normal @ self.origin)) > 1e-6:
+            return None
+        if abs(abs(self.u_dir[2]) - 1.0) < 1e-9:
+            zc, w, wdir, B = self.u * self.u_dir[2], self.v, self.v_dir, np.swapaxes(self.B, 0, 1)
+        elif abs(abs(self.v_dir[2]) - 1.0) < 1e-9:
+            zc, w, wdir, B = self.v * self.v_dir[2], self.u, self.u_dir, self.B
+        else:
+            return None
+        zc = zc + float(self.origin[2])
+        if zc[0] > zc[-1]:
+            zc, B = zc[::-1], B[:, ::-1]
+        i0 = int(np.argmin(np.abs(w)))
+        npos, nneg = len(w) - 1 - i0, i0
+        if abs(w[i0]) > 1e-6 or npos < 2 or nneg < 2:
+            return None                              # the axis is not a grid line, or one half is missing
+        Br, Bz = B[i0:, :, :] @ wdir, B[i0:, :, :] @ ez            # (r >= 0, z)
+        m = min(npos, nneg) + 1
+        Br2, Bz2 = -(B[i0::-1, :, :] @ wdir)[:m], (B[i0::-1, :, :] @ ez)[:m]
+        scale = max(float(np.abs(Br[:m]).max()), float(np.abs(Bz[:m]).max()), 1e-9)
+        if max(float(np.abs(Br[:m] - Br2).max()), float(np.abs(Bz[:m] - Bz2).max())) > 2e-3 * scale:
+            return None
+        return AxialField(w[i0:] / 10.0, zc / 10.0, Br, Bz)
+
+
+def load_field(path, scale=1.0):
+    """FieldMap (GEMC text map) or SampledField (field.npz), told apart by content"""
+    with open(path, "rb") as fh:
+        magic = fh.read(4)
+    return SampledField(path, scale) if magic == b"PK\x03\x04" else FieldMap(path, scale)
+
+
+def _in_rings(px, py, rings_by_solid):
+    """points inside the section outlines: even-odd within one solid (holes stay open), any solid"""
+    px, py = np.asarray(px, float), np.asarray(py, float)
+    out = np.zeros(px.shape, bool)
+    for rings in rings_by_solid:
+        x0 = min(r[:, 0].min() for r in rings)
+        x1 = max(r[:, 0].max() for r in rings)
+        y0 = min(r[:, 1].min() for r in rings)
+        y1 = max(r[:, 1].max() for r in rings)
+        box = (px >= x0) & (px <= x1) & (py >= y0) & (py <= y1)
+        if not box.any():
+            continue
+        X, Y = px[box], py[box]
+        ins = np.zeros(X.shape, bool)
+        for ring in rings:
+            Q = np.roll(ring, -1, axis=0)
+            for (xa, ya), (xb, yb) in zip(ring, Q):
+                if ya == yb:
+                    continue
+                cond = (ya > Y) != (yb > Y)
+                ins ^= cond & (X < xa + (Y - ya) * (xb - xa) / (yb - ya))
+        out[box] |= ins
+    return out
+
+
+def _streamlines(ux, uy, valid, sep, h=1.0):
+    """Evenly spaced lines along a direction field.
+
+    ux, uy (ny, nx): unit direction on a regular grid (grid units, 0 where not valid); `sep`: wanted
+    distance between lines, in grid units.  All seeds of a regular grid are integrated in both
+    directions (midpoint rule, step h), until they leave the grid or the valid region.  The
+    candidates are then taken longest first: of each one the longest part that stays at least a
+    quarter to a half of `sep` away from the lines already taken is kept, and a line that closes on
+    itself is cut after one turn.
+    Returns a list of (n, 2) arrays (x, y in grid units)."""
+    ny, nx = ux.shape
+    if nx < 3 or ny < 3 or not valid.any():
+        return []
+
+    def sample(x, y):
+        inside = (x >= 0) & (x <= nx - 1) & (y >= 0) & (y <= ny - 1)
+        i = np.clip(np.floor(y).astype(np.int64), 0, ny - 2)
+        j = np.clip(np.floor(x).astype(np.int64), 0, nx - 2)
+        a, b = y - i, x - j
+        dx = (ux[i, j] * (1 - a) * (1 - b) + ux[i, j + 1] * (1 - a) * b + ux[i + 1, j] * a * (1 - b)
+              + ux[i + 1, j + 1] * a * b)
+        dy = (uy[i, j] * (1 - a) * (1 - b) + uy[i, j + 1] * (1 - a) * b + uy[i + 1, j] * a * (1 - b)
+              + uy[i + 1, j + 1] * a * b)
+        nrm = np.hypot(dx, dy)
+        near = valid[np.clip(np.rint(y).astype(np.int64), 0, ny - 1), np.clip(np.rint(x).astype(np.int64), 0, nx - 1)]
+        ok = inside & near & (nrm > 0.5)
+        nrm = np.maximum(nrm, 1e-9)
+        return dx / nrm, dy / nrm, ok
+
+    sx, sy = np.meshgrid(np.arange(0.3 * sep, nx - 1, 0.6 * sep), np.arange(0.3 * sep, ny - 1, 0.6 * sep))
+    sx, sy = sx.ravel(), sy.ravel()
+    _, _, ok = sample(sx, sy)
+    sx, sy = sx[ok], sy[ok]
+    if len(sx) == 0:
+        return []
+    def valid_at(x, y):
+        return ((x >= 0) & (x <= nx - 1) & (y >= 0) & (y <= ny - 1)
+                & valid[np.clip(np.rint(y).astype(np.int64), 0, ny - 1), np.clip(np.rint(x).astype(np.int64), 0, nx - 1)])
+
+    nsteps = int(1.2 * (nx + ny) / h)
+    half = []
+    for sign in (1.0, -1.0):
+        T = np.full((len(sx), nsteps + 1, 2), np.nan)
+        T[:, 0, 0], T[:, 0, 1] = sx, sy
+        idx = np.arange(len(sx))                       # the lines still running
+        x, y = sx.copy(), sy.copy()
+        for k in range(nsteps):
+            d1x, d1y, ok1 = sample(x, y)
+            d2x, d2y, ok2 = sample(x + 0.5 * h * sign * d1x, y + 0.5 * h * sign * d1y)
+            x, y = x + h * sign * d2x, y + h * sign * d2y
+            ok = ok1 & ok2 & valid_at(x, y)
+            if not ok.all():
+                idx, x, y = idx[ok], x[ok], y[ok]
+                if len(idx) == 0:
+                    break
+            T[idx, k + 1, 0], T[idx, k + 1, 1] = x, y
+        half.append(T)
+    cand = []
+    for k in range(len(sx)):
+        f, bk = half[0][k], half[1][k]
+        f, bk = f[np.isfinite(f[:, 0])], bk[np.isfinite(bk[:, 0])]
+        pts = np.concatenate([bk[:0:-1], f])
+        if len(pts) >= 3:
+            cand.append(pts)
+    cand.sort(key=lambda q: -len(q))
+    cell = 0.25 * sep                                 # a taken line keeps others 1 to 2 cells away
+    occ = np.zeros((int(ny / cell) + 3, int(nx / cell) + 3), bool)
+    min_pts = int(2.0 * sep / h)
+    out = []
+    for pts in cand:
+        ci, cj = (pts[:, 1] / cell).astype(np.int64) + 1, (pts[:, 0] / cell).astype(np.int64) + 1
+        # a line that closes on itself: stop when it comes back to a cell it left more than 3 cells ago
+        ent = np.nonzero(np.r_[True, (ci[1:] != ci[:-1]) | (cj[1:] != cj[:-1])])[0]
+        seen, cut = {}, len(pts)
+        for q, k in enumerate(ent):
+            key = (int(ci[k]), int(cj[k]))
+            if key in seen and q - seen[key] > 3:
+                cut = int(k)
+                break
+            seen[key] = q
+        free = ~occ[ci[:cut], cj[:cut]]
+        if not free.any():
+            continue
+        edges = np.diff(np.r_[False, free, False].astype(np.int8))
+        st, en = np.nonzero(edges == 1)[0], np.nonzero(edges == -1)[0]
+        k = int(np.argmax(en - st))
+        a, b = int(st[k]), int(en[k])
+        if b - a < min_pts:
+            continue
+        out.append(pts[a:b])
+        for di in (-1, 0, 1):
+            for dj in (-1, 0, 1):
+                occ[ci[a:b] + di, cj[a:b] + dj] = True
+    return out
+
+
 def _clip_to_box(xy, W, H, y0=0.0):
     """pieces of a polyline inside the canvas (points outside are dropped)"""
     ok = (xy[:, 0] >= 0) & (xy[:, 0] <= W) & (xy[:, 1] >= y0) & (xy[:, 1] <= H)
@@ -2218,21 +2608,25 @@ def _simplify(xy, tol):
     return xy[keep]
 
 
-def draw_field(dl, sc, o, cam, plane, fit, loops, to_px):
-    """Field layer of a section: bands, field lines, arrows.  Returns the legend entries drawn."""
+def draw_field(dl, sc, o, cam, plane, fit, loops, to_px, window=None):
+    """Field layer of a section: bands, field lines, arrows.  Returns what was drawn, for the key
+    (None if nothing was)."""
     if not cam.ortho:
         log("warning: --field needs an orthographic view, skipped", 0)
-        return False
+        return None
     s, cx, cy, W, H = fit
     n, d = plane
     ne = float(n @ cam.e)
     if abs(ne) < 1e-6:
         log("warning: --field: the section plane is seen edge-on, skipped", 0)
-        return False
-    with timed("read field map"):
-        fm = FieldMap(o.field, o.field_scale)
+        return None
+    with timed("read field"):
+        fld = load_field(o.field, o.field_scale)
+    fld.check_plane(n, d)
     pt = o.dpi / 72.0
     ytop = float(title_band_px(o))              # the title band stays clear
+    bgc = o.background if o.background is not None else (1.0, 1.0, 1.0)
+    info = {"bands": FIELD_MIN_BANDS, "lines": None, "arrows": False, "out": False, "into": False, "iron": False}
 
     def world(px, py):
         x, y = (px - 0.5 * W) / s + cx, (0.5 * H - py) / s + cy
@@ -2240,27 +2634,19 @@ def draw_field(dl, sc, o, cam, plane, fit, loops, to_px):
         t = -(P @ n + d) / ne
         return P + t[:, None] * cam.e[None, :]
 
-    def field_at(P):
-        rr = np.hypot(P[:, 0], P[:, 1])
-        br, bz, inside = fm.at(rr / 10.0, P[:, 2] / 10.0)
-        k = np.where(rr > 1e-9, br / np.maximum(rr, 1e-9), 0.0)
-        return np.stack([k * P[:, 0], k * P[:, 1], bz], 1), inside
-
     # ---- |B| bands, one value per canvas pixel
     with timed("field bands"):
         X, Y = np.meshgrid(np.arange(W) + 0.5, np.arange(H) + 0.5)
-        B, inside = field_at(world(X.ravel(), Y.ravel()))
+        B, inside = fld.vector(world(X.ravel(), Y.ravel()))
         mag = np.linalg.norm(B, axis=1)
         band = np.searchsorted(FIELD_BANDS_G, mag, side="right") - 1          # -1: below the first edge
-        bg = o.background if o.background is not None else (1.0, 1.0, 1.0)
-        pal = np.array([bg] + [_hexrgb(h) for h in FIELD_RAMP])
+        pal = np.array([bgc] + [_hexrgb(h) for h in FIELD_RAMP])
         band = np.where(inside & (Y.ravel() >= ytop), np.clip(band, -1, len(FIELD_RAMP) - 1), -1)
+        info["bands"] = max(FIELD_MIN_BANDS, int(band.max()) + 1)
         img = (pal[band + 1].reshape(H, W, 3) * 255 + 0.5).astype(np.uint8)
         dl.image(img, 0.0, 0.0, W, H)
 
-    # ---- iron in the plane: filled grey at the end (the map is not meaningful inside it)
-    axial = abs(n[2]) < 1e-6 and abs(d) < 1e-6
-    iron = None
+    # ---- iron in the plane: filled grey at the end (the field is not meaningful inside it)
     rx = re.compile(o.field_iron) if o.field_iron else None
     iron_loops, iron_rings = [], defaultdict(list)
     for sid, pts, closed in loops:
@@ -2268,108 +2654,182 @@ def draw_field(dl, sc, o, cam, plane, fit, loops, to_px):
             iron_loops.append(pts)
             x, y, _ = to_px(pts)
             iron_rings[sid].append(np.stack([x, y], 1))
-    if axial:
-        ur = _unit(np.cross(n, [0.0, 0.0, 1.0]))
-        polys = [np.stack([np.abs(pts @ ur), pts[:, 2]], 1) / 10.0 for pts in iron_loops]
-        iron = fm.iron_mask(polys, grow=1)
-        if not polys and o.field_lines > 0:
-            log("  --field: no solid matches --field-iron; the flux function is integrated along r", 1)
+    rings = [iron_rings[sid] for sid in sorted(iron_rings)]
+    info["iron"] = bool(rings)
 
     # ---- field lines
-    if o.field_lines > 0 and not axial:
-        log("  --field: field lines are drawn for section planes through the z axis only", 1)
-    if o.field_lines > 0 and axial:
+    ax = fld.axial(n, d) if o.field_lines > 0 else None
+    if ax is not None:
+        # the in-plane field is axisymmetric about z: equal-flux lines
         try:
             from contourpy import contour_generator
         except ImportError:
             contour_generator = None
             log("warning: --field: no field lines (python module contourpy not found)", 0)
         if contour_generator is not None:
-            with timed("field lines"):
-                psi = fm.flux(iron)
-                # levels from the part of the map that is on the canvas
+            with timed("field lines (equal flux)"):
+                ur = _unit(np.cross(n, [0.0, 0.0, 1.0]))
+                polys = [np.stack([np.abs(pts @ ur), pts[:, 2]], 1) / 10.0 for pts in iron_loops]
+                if not polys:
+                    log("  --field: no solid matches --field-iron; the flux function is integrated along r", 1)
+                psi = ax.flux(ax.iron_mask(polys, grow=1))
+                # levels from the part of the field that is on the canvas
                 c = world(np.array([0.0, W, 0.0, W]), np.array([0.0, 0.0, H, H]))
                 rmax, z0, z1 = np.abs(c @ ur).max() / 10.0, c[:, 2].min() / 10.0, c[:, 2].max() / 10.0
-                sel = np.isfinite(psi) & (fm.r[:, None] <= rmax) & (fm.z[None, :] >= z0) & (fm.z[None, :] <= z1)
+                sel = np.isfinite(psi) & (ax.r[:, None] <= rmax) & (ax.z[None, :] >= z0) & (ax.z[None, :] <= z1)
                 pls = []
                 if sel.any():
                     lo, hi = psi[sel].min(), psi[sel].max()
-                    cg = contour_generator(x=fm.z, y=fm.r, z=np.ma.masked_invalid(psi))
+                    cg = contour_generator(x=ax.z, y=ax.r, z=np.ma.masked_invalid(psi))
                     for k in range(o.field_lines):
                         for ln in cg.lines(lo + (hi - lo) * (k + 0.5) / o.field_lines):
                             for sign in (1.0, -1.0):
                                 P = (sign * ln[:, 1:2] * ur[None, :] + ln[:, 0:1] * np.array([[0.0, 0.0, 1.0]])) * 10.0
                                 x, y, _ = to_px(P)
                                 pls += [_simplify(q, 0.25) for q in _clip_to_box(np.stack([x, y], 1), W, H, ytop)]
-                bgc = o.background if o.background is not None else (1.0, 1.0, 1.0)
                 dl.lines(pls, bgc, 2.6 * o.field_lw)
                 dl.lines(pls, FIELD_LINE_RGB, o.field_lw)
+                if pls:
+                    info["lines"] = "flux"
+    elif o.field_lines > 0:
+        # no symmetry to use: lines along the in-plane direction, evenly spaced
+        with timed("field lines (evenly spaced)"):
+            g = 4.0                                                    # px between direction samples
+            gx, gy = np.arange(0.0, W + g, g), np.arange(ytop, H + g, g)
+            GX, GY = np.meshgrid(gx, gy)
+            Bg, ins = fld.vector(world(GX.ravel(), GY.ravel()))
+            mg = np.linalg.norm(Bg, axis=1)
+            vx, vy = Bg @ cam.r, -(Bg @ cam.u)
+            vn = np.hypot(vx, vy)
+            ok = ins & (mg >= FIELD_BANDS_G[0]) & (vn > 0.3 * mg) & (GX.ravel() <= W) & (GY.ravel() <= H)
+            if rings:
+                ok &= ~_in_rings(GX.ravel(), GY.ravel(), rings)
+            vn = np.maximum(vn, 1e-30)
+            ux = np.where(ok, vx / vn, 0.0).reshape(GX.shape)
+            uy = np.where(ok, vy / vn, 0.0).reshape(GX.shape)
+            sep = max(H - ytop, 0.5 * W) / float(o.field_lines)
+            pls = [_simplify(np.stack([q[:, 0] * g, ytop + q[:, 1] * g], 1), 0.3)
+                   for q in _streamlines(ux, uy, ok.reshape(GX.shape), sep / g)]
+            dl.lines(pls, bgc, 2.6 * o.field_lw)
+            dl.lines(pls, FIELD_LINE_RGB, o.field_lw)
+            if pls:
+                info["lines"] = "even"
 
-    # ---- direction arrows
+    # ---- direction: arrows in the plane, dot / cross in a circle where the field leaves the plane
     if o.field_arrows > 0:
         step = o.field_arrows * s
         xs = np.arange(0.5 * (W % step if W % step else step), W, step)
         ys = np.arange(0.5 * (H % step if H % step else step), H, step)
         X, Y = np.meshgrid(xs, ys)
-        P = world(X.ravel(), Y.ravel())
-        B, inside = field_at(P)
+        X, Y = X.ravel(), Y.ravel()
+        B, inside = fld.vector(world(X, Y))
         mag = np.linalg.norm(B, axis=1)
         vx, vy = B @ cam.r, -(B @ cam.u)
         vn = np.hypot(vx, vy)
-        ok = inside & (mag >= FIELD_BANDS_G[0]) & (vn > 0.3 * mag) & (Y.ravel() - 0.5 * step >= ytop)
-        if iron is not None:
-            wide = fm.iron_mask([], 0) | iron
-            for _ in range(3):
-                g = wide.copy()
-                g[1:] |= wide[:-1]; g[:-1] |= wide[1:]; g[:, 1:] |= wide[:, :-1]; g[:, :-1] |= wide[:, 1:]
-                wide = g
-            i = np.clip(np.rint((np.hypot(P[:, 0], P[:, 1]) / 10.0 - fm.r[0]) / (fm.r[1] - fm.r[0])), 0,
-                        len(fm.r) - 1).astype(int)
-            j = np.clip(np.rint((P[:, 2] / 10.0 - fm.z[0]) / (fm.z[1] - fm.z[0])), 0, len(fm.z) - 1).astype(int)
-            ok &= ~wide[i, j]
+        bn = B @ cam.e                                                 # > 0: towards the viewer
         L, hl = 0.42 * step, min(0.16 * step, 3.2 * pt)
+        ok = inside & (mag >= FIELD_BANDS_G[0]) & (Y - 0.5 * step >= ytop)
+        if rings:
+            for ox, oy in ((0.0, 0.0), (0.5 * L, 0.0), (-0.5 * L, 0.0), (0.0, 0.5 * L), (0.0, -0.5 * L)):
+                ok &= ~_in_rings(X + ox, Y + oy, rings)
+        arr = ok & (vn > 0.3 * mag)
         pls = []
-        for x, y, ax_, ay_ in zip(X.ravel()[ok], Y.ravel()[ok], (vx / np.maximum(vn, 1e-30))[ok],
-                                  (vy / np.maximum(vn, 1e-30))[ok]):
+        for x, y, ax_, ay_ in zip(X[arr], Y[arr], (vx / np.maximum(vn, 1e-30))[arr],
+                                  (vy / np.maximum(vn, 1e-30))[arr]):
             tip = np.array([x + 0.5 * L * ax_, y + 0.5 * L * ay_])
             tail = np.array([x - 0.5 * L * ax_, y - 0.5 * L * ay_])
             ang = math.atan2(ay_, ax_)
             pls.append(np.array([tail, tip]))
             pls.append(np.array([tip + hl * np.array([math.cos(ang + 2.7), math.sin(ang + 2.7)]), tip,
                                  tip + hl * np.array([math.cos(ang - 2.7), math.sin(ang - 2.7)])]))
+        info["arrows"] = bool(arr.any())
+        rad = min(0.15 * step, 4.2 * pt)
+        for x, y, toward in zip(X[ok & ~arr], Y[ok & ~arr], (bn > 0)[ok & ~arr]):
+            pls += _normal_mark(x, y, rad, toward, dl)
+            info["out" if toward else "into"] = True
         dl.lines(pls, FIELD_ARROW_RGB, 0.45)
     # iron on top of the field layer; one fill per solid, so that its holes stay open (even-odd) and
     # touching pieces do not cancel
-    for sid in sorted(iron_rings):
-        dl.fill(iron_rings[sid], FIELD_IRON_RGB)
-    return True
+    for r_ in rings:
+        if window is not None:
+            r_ = [q for q in (clip_polygon_rect(q, window) for q in r_) if len(q) >= 3]
+        dl.fill(r_, FIELD_IRON_RGB)
+    return info
 
 
-def draw_field_legend(dl, o, W0, H0):
-    """Colour key right of the drawing (the canvas grows): bands with their edges, line and arrow keys."""
+def _normal_mark(x, y, rad, toward, dl):
+    """Circle with a dot (field towards the viewer) or a cross (away).  Returns its polylines; the dot
+    is added to the draw list."""
+    t = np.linspace(0.0, TWO_PI, 25)
+    pls = [np.stack([x + rad * np.cos(t), y + rad * np.sin(t)], 1)]
+    if toward:
+        dl.marker("circle", x, y, 0.32 * rad, FIELD_ARROW_RGB)
+    else:
+        k = rad * math.sqrt(0.5)
+        pls += [np.array([[x - k, y - k], [x + k, y + k]]), np.array([[x - k, y + k], [x + k, y - k]])]
+    return pls
+
+
+def draw_field_legend(dl, o, W0, H0, info):
+    """Key right of the drawing (the canvas grows): the bands with their edges, then what the lines,
+    arrows and marks mean."""
     pt = o.dpi / 72.0
     fs = max(6.0, o.font_size - 1.5)
     fpx = fs * pt
     sw, sh = 1.1 * fpx, 1.55 * fpx
-    nb = len(FIELD_RAMP)
+    nb = info["bands"]
+    keys = []                                        # (kind, text, small second line)
+    if info["iron"]:
+        keys.append(("iron", "iron", None))
+    if info["lines"]:
+        keys.append(("line", "field lines", "equal flux between lines" if info["lines"] == "flux"
+                     else "direction only, evenly spaced"))
+    if info["arrows"]:
+        keys.append(("arrow", "direction", None))
+    if info["out"]:
+        keys.append(("out", "out of the page", None))
+    if info["into"]:
+        keys.append(("into", "into the page", None))
+    row = 1.75 * fpx
+    hkeys = sum(row + (0.95 * fpx if k[2] else 0.0) for k in keys)
     x0 = W0 + 1.2 * fpx
-    y1 = 0.5 * H0 + 0.5 * nb * sh                    # lower edge of the first band
+    tx = x0 + sw + 0.45 * fpx
+    y1 = 0.5 * H0 + 0.5 * (nb * sh - hkeys - 1.0 * fpx)             # lower edge of the first band
     ink = (0.32, 0.32, 0.31)
-    for k, h in enumerate(FIELD_RAMP):
+    for k in range(nb):
         ya, yb = y1 - (k + 1) * sh, y1 - k * sh
-        dl.fill([np.array([[x0, ya], [x0 + sw, ya], [x0 + sw, yb], [x0, yb]])], _hexrgb(h))
-    for k, g in enumerate(FIELD_BANDS_G):
-        dl.text(x0 + sw + 0.45 * fpx, y1 - k * sh + 0.34 * fpx, field_text(g), fs, ink)
+        dl.fill([np.array([[x0, ya], [x0 + sw, ya], [x0 + sw, yb], [x0, yb]])], _hexrgb(FIELD_RAMP[k]))
+    for k in range(nb + 1):
+        dl.text(tx, y1 - k * sh + 0.34 * fpx, field_text(FIELD_BANDS_G[k]), fs, ink)
     dl.lines([np.array([[x0, y1 - nb * sh], [x0 + sw, y1 - nb * sh], [x0 + sw, y1], [x0, y1], [x0, y1 - nb * sh]])],
              (0.75, 0.75, 0.73), 0.4)
     dl.text(x0, y1 - nb * sh - 0.9 * fpx, "|B|", fs + 1, (0.05, 0.05, 0.05))
     dl.text(x0, y1 + 1.5 * fpx, "below 1 G: blank", fs - 0.5, ink)
+    wmax = text_width("below 1 G: blank", (fs - 0.5) * pt) - sw - 0.45 * fpx
     yk = y1 + 3.4 * fpx
-    dl.fill([np.array([[x0, yk - 0.8 * fpx], [x0 + sw, yk - 0.8 * fpx], [x0 + sw, yk + 0.2 * fpx], [x0, yk + 0.2 * fpx]])],
-            FIELD_IRON_RGB)
-    dl.text(x0 + sw + 0.45 * fpx, yk, "iron", fs, ink)
-    dl.W = max(dl.W, int(math.ceil(W0 + 1.2 * fpx + sw + 0.45 * fpx + text_width("below 1 G: blank", fs * pt)
-                                   + 0.8 * fpx)))
+    xm = x0 + 0.5 * sw
+    for kind, text, small in keys:
+        ym = yk - 0.32 * fpx                         # mid height of the text line
+        if kind == "iron":
+            dl.fill([np.array([[x0, yk - 0.8 * fpx], [x0 + sw, yk - 0.8 * fpx], [x0 + sw, yk + 0.2 * fpx],
+                               [x0, yk + 0.2 * fpx]])], FIELD_IRON_RGB)
+        elif kind == "line":
+            dl.lines([np.array([[x0, ym], [x0 + sw, ym]])], FIELD_LINE_RGB, max(o.field_lw, 0.6))
+        elif kind == "arrow":
+            hl = 0.3 * sw
+            dl.lines([np.array([[x0, ym], [x0 + sw, ym]]),
+                      np.array([[x0 + sw - hl, ym - 0.6 * hl], [x0 + sw, ym], [x0 + sw - hl, ym + 0.6 * hl]])],
+                     FIELD_ARROW_RGB, 0.45)
+        else:
+            dl.lines(_normal_mark(xm, ym, 0.42 * sw, kind == "out", dl), FIELD_ARROW_RGB, 0.45)
+        dl.text(tx, yk, text, fs, ink)
+        wmax = max(wmax, text_width(text, fs * pt))
+        yk += row
+        if small:
+            dl.text(tx, yk - 0.8 * fpx, small, fs - 1.5, ink)
+            wmax = max(wmax, text_width(small, (fs - 1.5) * pt))
+            yk += 0.95 * fpx
+    dl.W = max(dl.W, int(math.ceil(tx + wmax + 0.8 * fpx)))
 
 
 # =============================================================================
@@ -2428,19 +2888,25 @@ def render_section(sc, o, cam, plane, extra_planes):
 
     rd.to_px = to_px
     dl = DrawList(W, H, o.dpi, o.background)
-    has_field = bool(o.field) and draw_field(dl, sc, o, cam, plane, (s, cx, cy, W, H), loops, to_px)
+    win = rd.window
+    field_info = draw_field(dl, sc, o, cam, plane, (s, cx, cy, W, H), loops, to_px, win) if o.field else None
     if o.fill:
         by = defaultdict(list)
         for sid, pts, closed in loops:
             if closed and len(pts) >= 3:
                 x, y, _ = to_px(pts)
-                by[sid].append(np.stack([x, y], 1))
+                ring = np.stack([x, y], 1)
+                if win is not None:
+                    ring = clip_polygon_rect(ring, win)
+                if len(ring) >= 3:
+                    by[sid].append(ring)
         w = o.fill_lighten
         for sid in sorted(by):
             c = sc.solids[sid].color
             dl.fill(by[sid], tuple(w + (1 - w) * v for v in c), alpha=o.fill_alpha)
     groups = defaultdict(list)
     vis = []
+    cols = []                                       # line colours, in order of first use
     for sid, pts, closed in loops:
         x, y, _ = to_px(pts)
         xy = np.stack([x, y], 1)
@@ -2448,20 +2914,38 @@ def render_section(sc, o, cam, plane, extra_planes):
             xy = np.vstack([xy, xy[:1]])
         col = tuple(np.array(sc.solids[sid].color) * o.line_color_scale) if o.color_lines else o.line_color
         groups[col].append(xy)
-        vis.append((xy[:-1], xy[1:], np.full(len(xy) - 1, sid, np.int64)))
-    for col, pls in groups.items():
-        dl.lines(pls, col, o.lw_cut if o.lw_cut else o.lw)
+        if col not in cols:
+            cols.append(col)
+        k = len(xy) - 1
+        vis.append((xy[:-1], xy[1:], np.full(k, sid, np.int64), np.full(k, cols.index(col), np.int64)))
+    lw_sec = o.lw_cut if o.lw_cut else o.lw
+    rd.vis_segs = None
     if vis:
         a = np.concatenate([v[0] for v in vis])
         b = np.concatenate([v[1] for v in vis])
-        rd.vis_segs = (a[:, 0], a[:, 1], b[:, 0], b[:, 1], np.concatenate([v[2] for v in vis]))
-    else:
-        rd.vis_segs = None
+        sid_, cid = np.concatenate([v[2] for v in vis]), np.concatenate([v[3] for v in vis])
+        x0, y0, x1, y1 = a[:, 0], a[:, 1], b[:, 0], b[:, 1]
+        if win is not None:
+            x0, y0, x1, y1, src = clip_segments_rect(x0, y0, x1, y1, win)
+            sid_, cid = sid_[src], cid[src]
+        rd.vis_segs = (x0, y0, x1, y1, sid_)
+        if not o.keep_overdraw:
+            # outlines of touching volumes share parts of their boundary: draw those once
+            x0, y0, x1, y1, src = merge_collinear(x0, y0, x1, y1, np.zeros(len(x0)), cid)
+            cid = cid[src]
+        if win is not None or not o.keep_overdraw:
+            for k, col in enumerate(cols):
+                m = cid == k
+                if m.any():
+                    dl.lines(chain_2d(x0[m], y0[m], x1[m], y1[m]), col, lw_sec)
+        else:
+            for col, pls in groups.items():
+                dl.lines(pls, col, lw_sec)
     rd._overlays(dl, cam, to_px, s, extra_planes)
     rd.project_beam_axis(to_px)
     rd._decorations(dl, cam, s)
-    if has_field:
-        draw_field_legend(dl, o, W, H)
+    if field_info:
+        draw_field_legend(dl, o, W, H, field_info)
     return dl, rd
 
 
@@ -3071,8 +3555,11 @@ def _glyph_outline(ch, bold=False):
 
 
 def _outlined(ch, bold=False):
-    """Greek letters are drawn as outlines in SVG/PDF/EPS when an outline is available."""
-    return ch in _GREEK and _glyph_outline(ch, bold) is not None
+    """Characters Helvetica does not have are drawn as outlines in SVG/PDF/EPS when an outline is
+    available: Greek letters, and anything beyond Latin-1 such as arrows.  As text they would come
+    from a fallback font of the viewer, with another width than the layout assumes (a browser then
+    squeezes the neighbouring spaces to keep the given text length)."""
+    return (ch in _GREEK or (ord(ch) > 0xFF and ch not in _SYMBOL)) and _glyph_outline(ch, bold) is not None
 
 
 def _glyph_width(ch, bold=False):
@@ -3842,7 +4329,14 @@ def build_parser():
     g.add_argument("--dawn-history", metavar="FILE", help="take camera, mag, style and aux-edge angle from a "
                                                           ".DAWN_1.history file")
     g.add_argument("--fit-box", nargs=4, type=parse_length, metavar=("X0", "X1", "Y0", "Y1"),
-                   help="fit this window (screen axes, mm, relative to the target) instead of the content")
+                   help="fit this window (screen axes, mm, relative to the target) instead of the content; "
+                        "sections and line drawings are clipped to it")
+    g.add_argument("--fit-volumes", metavar="REGEX",
+                   help="fit the view to the box around the volumes whose name matches, e.g. '(^|!)Target' for "
+                        "a close-up; everything else inside the window is drawn too, clipped at its edge "
+                        "(sections and line drawings)")
+    g.add_argument("--fit-pad", type=parse_length, default=0.0, metavar="LEN",
+                   help="widen the fitted window by LEN on every side, e.g. 1m")
     g = p.add_argument_group("cuts and sections")
     g.add_argument("--cut", nargs=4, type=float, action="append", metavar=("A", "B", "C", "D"),
                    help="keep a*x+b*y+c*z+d >= 0 (mm); repeatable (intersection of half spaces)")
@@ -3854,12 +4348,12 @@ def build_parser():
                    help="section plane for --mode section (default: from the view preset through the target)")
     g.add_argument("--plane", nargs=4, type=float, metavar=("A", "B", "C", "D"),
                    help="general section plane a*x+b*y+c*z+d=0 for --mode section")
-    g.add_argument("--plane-snap", type=parse_length, default=1e-6, metavar="LEN",
+    g.add_argument("--plane-snap", type=parse_length, default=1e-3, metavar="LEN",
                    help="vertices closer than LEN to a cut or section plane are moved off it by LEN, each solid "
                         "to one side, so that faces lying in the plane (sector sides at x = 0) do not depend on "
                         "rounding noise: a solid touching a section plane with a face is cut along that face, "
-                        "a solid touching a cut plane from the removed side is removed (default 1e-6 mm; 0 = "
-                        "off, as versions before 0.5.0)")
+                        "a solid touching a cut plane from the removed side is removed (default 1e-3 mm, "
+                        "above the coordinate precision of a DAWNFILE .prim; 0 = off, as versions before 0.5.0)")
     g.add_argument("--trim", action="append", type=parse_trim, metavar="REGEX=SPEC",
                    help="cut only the volumes matching REGEX; SPEC is 'auto' (z range of all other volumes, "
                         "+- --trim-margin) or a comma list of AXIS<LEN / AXIS>LEN, e.g. 'Beamline=z<5m'; repeatable")
@@ -3931,6 +4425,9 @@ def build_parser():
     g.add_argument("--slope-tol", type=float, default=1.0, help="depth tolerance in units of the occluder's "
                                                               "depth change per px")
     g.add_argument("--no-cull", action="store_true", help="rasterise back faces too")
+    g.add_argument("--keep-overdraw", action="store_true",
+                   help="draw lines that lie on top of each other more than once, as before 0.6.0 "
+                        "(default: overlapping parts of lines on one straight line are drawn once)")
     g.add_argument("--scale-bar", type=parse_length, nargs="?", const=0.0, default=None, metavar="LEN",
                    help="draw a scale bar (auto length if no value)")
     g.add_argument("--axes", action="store_true", help="draw a small x/y/z axis triad")
@@ -3942,13 +4439,16 @@ def build_parser():
     g.add_argument("--font-size", type=float, default=9.0)
     g.add_argument("--png-backend", choices=["auto", "cairo", "matplotlib"], default="auto")
     g = p.add_argument_group("magnetic field (section mode)")
-    g.add_argument("--field", metavar="MAP", help="GEMC 2-D field map (R Z Br Bz, axisymmetric about z), drawn "
-                   "under the section: |B| in colour bands, field lines and direction arrows")
+    g.add_argument("--field", metavar="FILE",
+                   help="field drawn under the section (|B| in colour bands, field lines, direction arrows): "
+                        "field.npz of solid_field_dump (the total field of a configuration on this plane) or a "
+                        "GEMC 2-D field map (R Z Br Bz, axisymmetric about z)")
     g.add_argument("--field-scale", type=float, default=1.0, metavar="F",
                    help="factor applied to the map, as the scale attribute of the field fragment (-1 flips it)")
     g.add_argument("--field-lines", type=int, default=24, metavar="N",
-                   help="number of field lines, equal flux between neighbours (default 24, 0 = none); "
-                        "for section planes through the z axis; needs the python module contourpy")
+                   help="number of field lines (default 24, 0 = none). Where the in-plane field is axisymmetric "
+                        "about z: N lines with equal flux between neighbours (needs the python module "
+                        "contourpy). Otherwise lines along the field direction, spaced by 1/N of the height")
     g.add_argument("--field-lw", type=float, default=0.45, help="field line width in pt (default 0.45)")
     g.add_argument("--field-arrows", type=parse_length, default=500.0, metavar="STEP",
                    help="spacing of the field-direction arrows (default 50cm, 0 = none)")

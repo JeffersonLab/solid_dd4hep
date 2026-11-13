@@ -192,11 +192,17 @@ def find_ffmpeg():
 
 
 class VideoWriter:
-    """Raw RGB frames piped into ffmpeg; MP4 (H.264, yuv420p: plays in PowerPoint, Keynote and browsers)
-    or WebM (VP9)."""
+    """Raw RGB frames piped into ffmpeg; MP4 (H.264 High profile, yuv420p, even frame size, index at the
+    start of the file: what PowerPoint, Keynote, QuickTime and browsers ask for) or WebM (VP9).
 
-    CODEC = {".mp4": ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20", "-movflags", "+faststart"],
-             ".webm": ["-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p", "-crf", "32", "-b:v", "0"]}
+    The frames are converted to YUV with the BT.709 matrix in limited range, and the stream says so.
+    Without these tags a player has to guess between BT.601 and BT.709 (most go by the frame height), and
+    a wrong guess shifts the colours of the energy scale."""
+
+    COLOR = ["-vf", "scale=out_color_matrix=bt709:out_range=tv,"
+             "setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv"]
+    CODEC = {".mp4": ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20"] + COLOR + ["-movflags", "+faststart"],
+             ".webm": ["-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p", "-crf", "32", "-b:v", "0"] + COLOR}
 
     def __init__(self, ffmpeg, path, width, height, fps, hold):
         ext = os.path.splitext(path)[1].lower()
