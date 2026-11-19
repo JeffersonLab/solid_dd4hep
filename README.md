@@ -55,6 +55,8 @@ computed in this repository from the magnet geometry.
 |---|---|
 | Design and conventions | [docs/design.md](docs/design.md) |
 | SoLID-Lite options and the tool that writes them | [docs/lite_options.md](docs/lite_options.md) |
+| Particle tables and acceptance from simulated events | [docs/analysis.md](docs/analysis.md) |
+| Event generators: J/ψ, SIDIS, single particles | [docs/generators.md](docs/generators.md) |
 | Comparison with solid_gemc and the reference documents | [docs/geometry_comparison.md](docs/geometry_comparison.md) |
 | Drawings: overviews, sections, cutaways, field on the geometry | [docs/visualization.md](docs/visualization.md) |
 | Event displays and animations | [docs/event_display.md](docs/event_display.md) |

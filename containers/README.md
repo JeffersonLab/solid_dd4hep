@@ -44,6 +44,7 @@ Then build and set up as in "Quick start" in the top-level README. The image is 
 | ffmpeg | MP4 output of the event-display animations |
 | gmsh (and libXcursor, libXinerama) | the field solver, `magnet_field/solve_rz.py` |
 | lAger 3.7.0 that starts, in `/opt/lager` | J/ψ events ([docs/event_display.md](../docs/event_display.md#generators)) |
+| SIDIS-RC EvGen (`sidisgen`) with the neutron by isospin rotation ([patch](patches/sidis-neutron-isospin.patch)), in `/opt/sidis` | SIDIS events with radiative corrections ([docs/generators.md](../docs/generators.md)) |
 | solid_dd4hep in `/opt/solid` | `ddsim` works without building anything |
 | Gaudi and k4FWCore, only with `--build-arg WITH_GAUDI=1` | reconstruction studies ([docs/reconstruction.md](../docs/reconstruction.md)) |
 

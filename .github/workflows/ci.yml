@@ -32,7 +32,7 @@ jobs:
             # geometry scene of a small test geometry; field sampling and field views; one simulated event
             # exported, drawn and animated; the SoLID-Lite option tool (the load_* tests are covered by the
             # geometry job below)
-            ctest --test-dir build -R 'scene_dump|field_view|event_display|lite_config' --output-on-failure
+            ctest --test-dir build -R 'scene_dump|field_view|event_display|lite_config|analysis' --output-on-failure
       - uses: actions/upload-artifact@v4
         with:
           name: install

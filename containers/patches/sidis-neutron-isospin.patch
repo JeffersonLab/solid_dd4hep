@@ -1,0 +1,251 @@
+SPDX-License-Identifier: GPL-3.0-or-later
+
+SIDIS-RC EvGen (https://github.com/duanebyer/sidis, GPL-3.0), commit 8f9881a: structure functions of the neutron.
+
+The built-in structure-function set "prokudin" (WW-SIDIS, Bastami et al., JHEP 06 (2019) 007) holds the proton's
+parton distributions, and sidisgen used it for every target: with "setup.target n" only the nucleon mass
+changed, and the cross sections on the neutron came out equal to those on the proton.
+
+With this patch the set takes the target. For the neutron every flavor sum of the structure functions uses the
+proton distribution of the isospin-rotated flavor (u <-> d, ubar <-> dbar): f1, g1, gT, h1, the Sivers,
+Boer-Mulders, worm-gear and pretzelosity functions alike. Charges and fragmentation functions keep the flavor
+of the struck quark. The proton is unchanged; for the deuteron sidisgen now says that the proton set is used.
+
+Check, Born cross sections at 11 GeV in 0.2 < x < 0.3, 2 < Q2 < 3 GeV2, 0.4 < z < 0.6, PhT2 < 0.3 GeV2
+(arbitrary units): p pi+ 7.21, p pi- 3.88, n pi+ 4.32, n pi- 3.75. (n pi+ + n pi-)/(p pi+ + p pi-) = 0.73, as
+F2n/F2p at this x.
+
+Apply in the source directory with: patch -p1 < sidis-neutron-isospin.patch
+
+diff --git a/app/sidisgen/main.cpp b/app/sidisgen/main.cpp
+index 67c5e66..b9f0c7e 100644
+--- a/app/sidisgen/main.cpp
++++ b/app/sidisgen/main.cpp
+@@ -243,9 +243,17 @@ void alloc_sf(
+ 	std::string base = parts.back();
+ 	parts.pop_back();
+ 	if (base == "prokudin") {
+-		std::cout << "Using Prokudin structure functions." << std::endl;
++		part::Nucleus target = params["setup.target"].any();
++		if (target == part::Nucleus::N) {
++			std::cout << "Using Prokudin structure functions, isospin-rotated for the neutron." << std::endl;
++		} else if (target == part::Nucleus::D) {
++			std::cout << "Using Prokudin structure functions." << std::endl;
++			std::cout << "Warning: these are the PROTON structure functions; the deuteron is not implemented." << std::endl;
++		} else {
++			std::cout << "Using Prokudin structure functions." << std::endl;
++		}
+ 		tmd_out->reset();
+-		sf_out->reset(new sf::set::ProkudinSfSet());
++		sf_out->reset(new sf::set::ProkudinSfSet(target));
+ 	} else if (base == "test") {
+ 		std::cout << "Using test structure functions." << std::endl;
+ 		part::Nucleus target = params["setup.target"].any();
+diff --git a/include/sidis/sf_set/prokudin.hpp b/include/sidis/sf_set/prokudin.hpp
+index 5b5cb2b..456ee3d 100644
+--- a/include/sidis/sf_set/prokudin.hpp
++++ b/include/sidis/sf_set/prokudin.hpp
+@@ -66,8 +66,13 @@ class ProkudinSfSet final : public SfSet {
+ 	Real xh1TperpM2(unsigned fl, Real x, Real Q_sq) const;
+ 	Real xh1perpM1(unsigned fl, Real x, Real Q_sq) const;
+ 
++	// Isospin rotation of a flavor index for a neutron target.
++	unsigned iso(unsigned fl) const;
++
+ public:
+-	ProkudinSfSet();
++	/// Structure functions of the proton, or of the neutron by isospin
++	/// rotation of the proton's parton distributions.
++	ProkudinSfSet(part::Nucleus target=part::Nucleus::P);
+ 	ProkudinSfSet(ProkudinSfSet const& other) = delete;
+ 	ProkudinSfSet(ProkudinSfSet&& other) noexcept;
+ 	ProkudinSfSet& operator=(ProkudinSfSet const& other) = delete;
+diff --git a/src/sf_set/prokudin.cpp b/src/sf_set/prokudin.cpp
+index 50b5985..d797bca 100644
+--- a/src/sf_set/prokudin.cpp
++++ b/src/sf_set/prokudin.cpp
+@@ -491,7 +491,7 @@ struct ProkudinSfSet::Impl {
+ };
+ 
+ ProkudinSfSet::ProkudinSfSet(ProkudinSfSet&& other) noexcept :
+-		SfSet(part::Nucleus::P),
++		SfSet(other.target),
+ 		_impl(nullptr) {
+ 	std::swap(_impl, other._impl);
+ }
+@@ -500,10 +500,33 @@ ProkudinSfSet& ProkudinSfSet::operator=(ProkudinSfSet&& other) noexcept {
+ 	return *this;
+ }
+ 
+-ProkudinSfSet::ProkudinSfSet() : SfSet(part::Nucleus::P) {
++ProkudinSfSet::ProkudinSfSet(part::Nucleus target) : SfSet(target) {
+ 	_impl = new Impl();
+ }
+ 
++// Flavor whose proton distribution is the distribution of flavor `fl` in the
++// target. For the neutron this is the isospin rotation u <-> d, ubar <-> dbar:
++// the neutron's u quarks are distributed like the proton's d quarks. Applied
++// to the parton distributions only; charges and fragmentation functions keep
++// the flavor of the struck quark.
++unsigned ProkudinSfSet::iso(unsigned fl) const {
++	if (target != part::Nucleus::N) {
++		return fl;
++	}
++	switch (fl) {
++	case 0:
++		return 1;
++	case 1:
++		return 0;
++	case 3:
++		return 4;
++	case 4:
++		return 3;
++	default:
++		return fl;
++	}
++}
++
+ ProkudinSfSet::~ProkudinSfSet() {
+ 	if (_impl != nullptr) {
+ 		delete _impl;
+@@ -514,7 +537,7 @@ Real ProkudinSfSet::F_UUT(part::Hadron h, Real x, Real z, Real Q_sq, Real ph_t_s
+ 	// Equation [2.5.1a].
+ 	Real result = 0.;
+ 	for (unsigned fl = 0; fl < NUM_FLAVORS; ++fl) {
+-		result += sq(charge(fl))*xf1(fl, x, Q_sq)*D1(h, fl, z, Q_sq);
++		result += sq(charge(fl))*xf1(iso(fl), x, Q_sq)*D1(h, fl, z, Q_sq);
+ 	}
+ 	Real l = lambda(z, F1_MEAN_K_PERP_SQ, D1_MEAN_P_PERP_SQ);
+ 	return G(ph_t_sq, l)*result;
+@@ -526,7 +549,7 @@ Real ProkudinSfSet::F_UU_cos_phih(part::Hadron h, Real x, Real z, Real Q_sq, Rea
+ 	Real result = 0.;
+ 	// Uses a WW-type approximation to rewrite in terms of `xf1`.
+ 	for (unsigned fl = 0; fl < NUM_FLAVORS; ++fl) {
+-		result += sq(charge(fl))*xf1(fl, x, Q_sq)*D1(h, fl, z, Q_sq);
++		result += sq(charge(fl))*xf1(iso(fl), x, Q_sq)*D1(h, fl, z, Q_sq);
+ 	}
+ 	Real l = lambda(z, F1_MEAN_K_PERP_SQ, D1_MEAN_P_PERP_SQ);
+ 	return -2.*F1_MEAN_K_PERP_SQ/Q*ph_t*(z/l)*G(ph_t_sq, l)*result;
+@@ -536,7 +559,7 @@ Real ProkudinSfSet::F_UU_cos_2phih(part::Hadron h, Real x, Real z, Real Q_sq, Re
+ 	Real mh = mass(h);
+ 	Real result = 0.;
+ 	for (unsigned fl = 0; fl < NUM_FLAVORS; ++fl) {
+-		result += sq(charge(fl))*xh1perpM1(fl, x, Q_sq)*H1perpM1(h, fl, z, Q_sq);
++		result += sq(charge(fl))*xh1perpM1(iso(fl), x, Q_sq)*H1perpM1(h, fl, z, Q_sq);
+ 	}
+ 	Real l = lambda(z, BM_MEAN_K_PERP_SQ, COLLINS_MEAN_P_PERP_SQ);
+ 	return 4.*M*mh*ph_t_sq*sq(z/l)*G(ph_t_sq, l)*result;
+@@ -550,7 +573,7 @@ Real ProkudinSfSet::F_UL_sin_phih(part::Hadron h, Real x, Real z, Real Q_sq, Rea
+ 	Real result = 0.;
+ 	// Use WW-type approximation to rewrite in terms of `xh1LperpM1`.
+ 	for (unsigned fl = 0; fl < NUM_FLAVORS; ++fl) {
+-		result += sq(charge(fl))*xh1LperpM1(fl, x, Q_sq)*H1perpM1(h, fl, z, Q_sq);
++		result += sq(charge(fl))*xh1LperpM1(iso(fl), x, Q_sq)*H1perpM1(h, fl, z, Q_sq);
+ 	}
+ 	// Approximate width with `H1_MEAN_K_PERP_SQ`.
+ 	Real l = lambda(z, H1_MEAN_K_PERP_SQ, COLLINS_MEAN_P_PERP_SQ);
+@@ -561,7 +584,7 @@ Real ProkudinSfSet::F_UL_sin_2phih(part::Hadron h, Real x, Real z, Real Q_sq, Re
+ 	Real mh = mass(h);
+ 	Real result = 0.;
+ 	for (unsigned fl = 0; fl < NUM_FLAVORS; ++fl) {
+-		result += sq(charge(fl))*xh1LperpM1(fl, x, Q_sq)*H1perpM1(h, fl, z, Q_sq);
++		result += sq(charge(fl))*xh1LperpM1(iso(fl), x, Q_sq)*H1perpM1(h, fl, z, Q_sq);
+ 	}
+ 	// Approximate width with `H1_MEAN_K_PERP_SQ`.
+ 	Real l = lambda(z, H1_MEAN_K_PERP_SQ, COLLINS_MEAN_P_PERP_SQ);
+@@ -573,7 +596,7 @@ Real ProkudinSfSet::F_UTT_sin_phih_m_phis(part::Hadron h, Real x, Real z, Real Q
+ 	Real ph_t = std::sqrt(ph_t_sq);
+ 	Real result = 0.;
+ 	for (unsigned fl = 0; fl < NUM_FLAVORS; ++fl) {
+-		result += sq(charge(fl))*xf1TperpM1(fl, x, Q_sq)*D1(h, fl, z, Q_sq);
++		result += sq(charge(fl))*xf1TperpM1(iso(fl), x, Q_sq)*D1(h, fl, z, Q_sq);
+ 	}
+ 	Real l = lambda(z, SIVERS_MEAN_K_PERP_SQ, D1_MEAN_P_PERP_SQ);
+ 	return -2.*M*z*ph_t/l*G(ph_t_sq, l)*result;
+@@ -585,12 +608,12 @@ Real ProkudinSfSet::F_UT_sin_2phih_m_phis(part::Hadron h, Real x, Real z, Real Q
+ 	Real result_1 = 0.;
+ 	// Use WW-type approximation to rewrite in terms of `xf1TperpM1`.
+ 	for (unsigned fl = 0; fl < NUM_FLAVORS; ++fl) {
+-		result_1 += sq(charge(fl))*xf1TperpM1(fl, x, Q_sq)*D1(h, fl, z, Q_sq);
++		result_1 += sq(charge(fl))*xf1TperpM1(iso(fl), x, Q_sq)*D1(h, fl, z, Q_sq);
+ 	}
+ 	Real result_2 = 0.;
+ 	// Use WW-type approximation to rewrite in terms of `h1TperpM2`.
+ 	for (unsigned fl = 0; fl < NUM_FLAVORS; ++fl) {
+-		result_2 += sq(charge(fl))*xh1TperpM2(fl, x, Q_sq)*H1perpM1(h, fl, z, Q_sq);
++		result_2 += sq(charge(fl))*xh1TperpM2(iso(fl), x, Q_sq)*H1perpM1(h, fl, z, Q_sq);
+ 	}
+ 	// Approximate width with `SIVERS_MEAN_K_PERP_SQ`.
+ 	Real l_1 = lambda(z, SIVERS_MEAN_K_PERP_SQ, D1_MEAN_P_PERP_SQ);
+@@ -609,7 +632,7 @@ Real ProkudinSfSet::F_UT_sin_3phih_m_phis(part::Hadron h, Real x, Real z, Real Q
+ 	Real ph_t = std::sqrt(ph_t_sq);
+ 	Real result = 0.;
+ 	for (unsigned fl = 0; fl < NUM_FLAVORS; ++fl) {
+-		result += sq(charge(fl))*xh1TperpM2(fl, x, Q_sq)*H1perpM1(h, fl, z, Q_sq);
++		result += sq(charge(fl))*xh1TperpM2(iso(fl), x, Q_sq)*H1perpM1(h, fl, z, Q_sq);
+ 	}
+ 	Real l = lambda(z, PRETZ_MEAN_K_PERP_SQ, COLLINS_MEAN_P_PERP_SQ);
+ 	return 2.*sq(M)*mh*std::pow(z*ph_t/l, 3)*G(ph_t_sq, l)*result;
+@@ -621,7 +644,7 @@ Real ProkudinSfSet::F_UT_sin_phis(part::Hadron h, Real x, Real z, Real Q_sq, Rea
+ 	Real result = 0.;
+ 	// WW-type approximation used here (see [2] for details).
+ 	for (unsigned fl = 0; fl < NUM_FLAVORS; ++fl) {
+-		result += sq(charge(fl))*xh1M1(fl, x, Q_sq)*H1perpM1(h, fl, z, Q_sq);
++		result += sq(charge(fl))*xh1M1(iso(fl), x, Q_sq)*H1perpM1(h, fl, z, Q_sq);
+ 	}
+ 	Real l = lambda(z, PRETZ_MEAN_K_PERP_SQ, COLLINS_MEAN_P_PERP_SQ);
+ 	return 8.*sq(M)*mh*sq(z)/(Q*l)*(1. - ph_t_sq/l)*G(ph_t_sq, l)*result;
+@@ -632,7 +655,7 @@ Real ProkudinSfSet::F_UT_sin_phih_p_phis(part::Hadron h, Real x, Real z, Real Q_
+ 	Real ph_t = std::sqrt(ph_t_sq);
+ 	Real result = 0.;
+ 	for (unsigned fl = 0; fl < NUM_FLAVORS; ++fl) {
+-		result += sq(charge(fl))*xh1(fl, x, Q_sq)*H1perpM1(h, fl, z, Q_sq);
++		result += sq(charge(fl))*xh1(iso(fl), x, Q_sq)*H1perpM1(h, fl, z, Q_sq);
+ 	}
+ 	Real l = lambda(z, H1_MEAN_K_PERP_SQ, COLLINS_MEAN_P_PERP_SQ);
+ 	return 2.*mh*z*ph_t/l*G(ph_t_sq, l)*result;
+@@ -642,7 +665,7 @@ Real ProkudinSfSet::F_LL(part::Hadron h, Real x, Real z, Real Q_sq, Real ph_t_sq
+ 	// Equation [2.5.5a].
+ 	Real result = 0.;
+ 	for (unsigned fl = 0; fl < NUM_FLAVORS; ++fl) {
+-		result += sq(charge(fl))*xg1(fl, x, Q_sq)*D1(h, fl, z, Q_sq);
++		result += sq(charge(fl))*xg1(iso(fl), x, Q_sq)*D1(h, fl, z, Q_sq);
+ 	}
+ 	Real l = lambda(z, G1_MEAN_K_PERP_SQ, D1_MEAN_P_PERP_SQ);
+ 	return G(ph_t_sq, l)*result;
+@@ -654,7 +677,7 @@ Real ProkudinSfSet::F_LL_cos_phih(part::Hadron h, Real x, Real z, Real Q_sq, Rea
+ 	Real result = 0.;
+ 	// Uses a WW-type approximation to rewrite in terms of `xg1`.
+ 	for (unsigned fl = 0; fl < NUM_FLAVORS; ++fl) {
+-		result += sq(charge(fl))*xg1(fl, x, Q_sq)*D1(h, fl, z, Q_sq);
++		result += sq(charge(fl))*xg1(iso(fl), x, Q_sq)*D1(h, fl, z, Q_sq);
+ 	}
+ 	// Approximate width with `G1_MEAN_K_PERP_SQ`.
+ 	Real l = lambda(z, G1_MEAN_K_PERP_SQ, D1_MEAN_P_PERP_SQ);
+@@ -667,7 +690,7 @@ Real ProkudinSfSet::F_LT_cos_phih_m_phis(part::Hadron h, Real x, Real z, Real Q_
+ 	Real result = 0.;
+ 	// Uses a WW-type approximation to rewrite in terms of `xgT`.
+ 	for (unsigned fl = 0; fl < NUM_FLAVORS; ++fl) {
+-		result += sq(charge(fl))*xgT(fl, x, Q_sq)*D1(h, fl, z, Q_sq);
++		result += sq(charge(fl))*xgT(iso(fl), x, Q_sq)*D1(h, fl, z, Q_sq);
+ 	}
+ 	// Approximate width with `G1_MEAN_K_PERP_SQ`.
+ 	Real l = lambda(z, G1_MEAN_K_PERP_SQ, D1_MEAN_P_PERP_SQ);
+@@ -679,7 +702,7 @@ Real ProkudinSfSet::F_LT_cos_2phih_m_phis(part::Hadron h, Real x, Real z, Real Q
+ 	Real result = 0.;
+ 	// Uses a WW-type approximation to rewrite in terms of `xgT`.
+ 	for (unsigned fl = 0; fl < NUM_FLAVORS; ++fl) {
+-		result += sq(charge(fl))*xgT(fl, x, Q_sq)*D1(h, fl, z, Q_sq);
++		result += sq(charge(fl))*xgT(iso(fl), x, Q_sq)*D1(h, fl, z, Q_sq);
+ 	}
+ 	// Approximate width with `G1_MEAN_K_PERP_SQ`.
+ 	Real l = lambda(z, G1_MEAN_K_PERP_SQ, D1_MEAN_P_PERP_SQ);
+@@ -690,7 +713,7 @@ Real ProkudinSfSet::F_LT_cos_phis(part::Hadron h, Real x, Real z, Real Q_sq, Rea
+ 	Real Q = std::sqrt(Q_sq);
+ 	Real result = 0.;
+ 	for (unsigned fl = 0; fl < NUM_FLAVORS; ++fl) {
+-		result += sq(charge(fl))*xgT(fl, x, Q_sq)*D1(h, fl, z, Q_sq);
++		result += sq(charge(fl))*xgT(iso(fl), x, Q_sq)*D1(h, fl, z, Q_sq);
+ 	}
+ 	// Approximate width with `G1_MEAN_K_PERP_SQ`.
+ 	Real l = lambda(z, G1_MEAN_K_PERP_SQ, D1_MEAN_P_PERP_SQ);

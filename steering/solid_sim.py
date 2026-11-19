@@ -21,6 +21,14 @@ Environment switches (all optional):
                         SOLID_TRAJ_EVERY=N (or N:R) records only the events whose number is 0 (or R) modulo N.
                         SOLID_TRAJ_TIMING=FILE appends the CPU time of every event to FILE
                         (scripts/event_display/recorder_overhead.py).
+    SOLID_MAX_TIME=NS   stop charged particles still being tracked after NS nanoseconds (default 1e5; 0 = no
+                        limit): the SoLIDTrackTimeLimit stepping action. An electron trapped by the field in a
+                        vacuum volume would otherwise never end its event.
+    SOLID_FAST=0|1      acceptance mode (default 0): the SoLIDShowerStop stacking action drops the secondaries
+                        born in the calorimeter shower modules with less than SOLID_FAST_MIN_EKIN MeV (default
+                        20), so only the energetic core of a shower develops there; the preshower is simulated
+                        in full. Several times faster for electrons. NOT for anything that needs the
+                        calorimeter response (docs/analysis.md).
 Command-line options of ddsim override everything set here.
 """
 import os
@@ -104,6 +112,19 @@ if _scene:
         return None
 
     SIM.physics.setupUserPhysics(setup_scene_dump)
+
+# --------------------------------------------------------------------------------------
+# particles trapped by the field in vacuum: stop charged tracks that are still moving long after the event
+_max_time = float(os.environ.get('SOLID_MAX_TIME', '1e5'))
+if _max_time > 0:
+    SIM.action.step = {'name': 'SoLIDTrackTimeLimit/TrackTimeLimit', 'parameter': {'MaxTime': _max_time}}
+
+# --------------------------------------------------------------------------------------
+# acceptance mode: no showers in the calorimeters
+if os.environ.get('SOLID_FAST', '0') not in ('', '0'):
+    SIM.action.stack = {'name': 'SoLIDShowerStop/ShowerStop',
+                        'parameter': {'Volumes': ['ECShower_'],
+                                      'MinEkin': float(os.environ.get('SOLID_FAST_MIN_EKIN', '20'))}}
 
 # --------------------------------------------------------------------------------------
 # trajectories for event displays: the SoLIDTrajectoryRecorder stepping action (libsolid_ddg4). It does not

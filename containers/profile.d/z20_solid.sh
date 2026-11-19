@@ -16,6 +16,13 @@ if [ -x /opt/lager/bin/lager ]; then
     *) export PATH="/opt/lager/bin:${PATH}" ;;
   esac
 fi
+# SIDIS-RC EvGen (containers/Dockerfile)
+if [ -x /opt/sidis/bin/sidisgen ]; then
+  case ":${PATH}:" in
+    *":/opt/sidis/bin:"*) ;;
+    *) export PATH="/opt/sidis/bin:${PATH}" ;;
+  esac
+fi
 if [ -d /opt/k4 ]; then
   export CMAKE_PREFIX_PATH="/opt/k4${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
   export LD_LIBRARY_PATH="/opt/k4/lib:${LD_LIBRARY_PATH}" PYTHONPATH="/opt/k4/python:${PYTHONPATH}" PATH="/opt/k4/bin:${PATH}"

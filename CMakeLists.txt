@@ -47,12 +47,15 @@ target_compile_options(${a_lib_name} PRIVATE -Wall -Wextra -Wno-unused-parameter
 # loading the detector description (reconstruction, displays) does not pull in Geant4.
 #   src/sim/SceneDump*: geometry scene for drawings (bin/solid_scene_dump, SOLID_SCENE in steering/solid_sim.py)
 #   src/sim/TrajectoryRecorder.cpp: trajectory points with times for event displays (SOLID_TRAJ)
+#   src/sim/TrackTimeLimit.cpp: stops charged particles trapped in the field (SOLID_MAX_TIME)
+#   src/sim/ShowerStop.cpp: drops secondaries born in the calorimeters, for acceptance runs (SOLID_FAST)
 find_package(Geant4 REQUIRED)
 find_package(ZLIB)
 set(a_sim_lib_name ${PROJECT_NAME}_ddg4)
 dd4hep_add_plugin(${a_sim_lib_name}
   SOURCES ${PROJECT_SOURCE_DIR}/src/sim/SceneDump.cpp ${PROJECT_SOURCE_DIR}/src/sim/SceneDumpPlugins.cpp
-          ${PROJECT_SOURCE_DIR}/src/sim/TrajectoryRecorder.cpp
+          ${PROJECT_SOURCE_DIR}/src/sim/TrajectoryRecorder.cpp ${PROJECT_SOURCE_DIR}/src/sim/TrackTimeLimit.cpp
+          ${PROJECT_SOURCE_DIR}/src/sim/ShowerStop.cpp
   USES DD4hep::DDCore DD4hep::DDG4 ROOT::Core ROOT::Geom ${Geant4_LIBRARIES}
 )
 target_include_directories(${a_sim_lib_name} PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/src/sim)
@@ -144,6 +147,19 @@ if(BUILD_TESTING)
             python3 ${PROJECT_SOURCE_DIR}/scripts/geometry/test_lite_config.py
   )
   set_tests_properties(lite_config PROPERTIES TIMEOUT 1800 LABELS geometry)
+
+  # analysis layer: single particles through ddsim, the particle table, detection and azimuthal segments, the
+  # acceptance tool, the track time limit
+  add_test(NAME analysis
+    COMMAND ${CMAKE_COMMAND} -E env
+            DETECTOR_PATH=${PROJECT_SOURCE_DIR}
+            LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}
+            PYTHONPATH=${PROJECT_SOURCE_DIR}/python:$ENV{PYTHONPATH}
+            PYTHONDONTWRITEBYTECODE=1
+            python3 ${PROJECT_SOURCE_DIR}/scripts/analysis/test_analysis.py
+                    --outdir ${PROJECT_BINARY_DIR}/analysis_test
+  )
+  set_tests_properties(analysis PROPERTIES TIMEOUT 1800 LABELS "events;analysis")
 
   # scene producer: a small geometry with a doubly placed, a reflected and a parameterised volume
   add_test(NAME scene_dump
